@@ -1,10 +1,12 @@
 
 import os
 import sys
-from typing import Optional, Dict, Any
-from fastapi import FastAPI
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from collections import deque
 
 # pastikan inference_rf.py bisa diimport (dalam folder yang sama)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,12 +30,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# In-memory storage untuk data IoT (max 1000 data points)
+iot_data_storage = deque(maxlen=1000)
+
 rfw = None
 @app.on_event("startup")
 def _load_model():
     global rfw
     rfw = RFRegressorWrapper(MODEL_PATH, FEATURES_ORDER_PATH)
     print(f"✓ Model loaded successfully from {MODEL_PATH}")
+
+# ====== DATA MODELS ======
+
+class IoTDataInput(BaseModel):
+    """Data dari ESP32/Mappi32"""
+    temp_c: float = Field(..., description="Temperature in °C", example=27.8)
+    do_mgl: float = Field(..., description="Dissolved Oxygen in mg/L", example=6.2)
+    ph: float = Field(..., description="pH", example=7.2)
+    conductivity_uscm: float = Field(..., description="Conductivity in µS/cm", example=620)
+    totalcoliform_mv: Optional[float] = Field(None, description="Total Coliform sensor reading in mV (optional)")
 
 class PredictRequest(BaseModel):
     temp_c: float = Field(..., description="Temperature in °C")
@@ -46,7 +61,7 @@ class ThresholdRequest(BaseModel):
     total_coliform_max_mpn_100ml: float = 0.0
     ph_min: float = 6.5
     ph_max: float = 8.5
-    conductivity_max_uscm: float = 1500.0
+    conductivity_max_uscm: float = 1000.0
     do_min_info_mgl: float = 5.0
 
 @app.get("/health")
@@ -95,4 +110,123 @@ def predict(req: PredictRequest):
             "thresholds": th.dict()
         },
         "status_badges": badges
+    }
+
+# ====== IoT ENDPOINTS ======
+
+@app.post("/iot/data")
+def receive_iot_data(data: IoTDataInput):
+    """
+    Endpoint untuk menerima data dari ESP32/Mappi32
+    
+    ESP32 akan POST data sensor ke endpoint ini.
+    Data akan disimpan di memory dan bisa diambil via /iot/latest
+    """
+    try:
+        # Simpan data dengan timestamp
+        iot_record = {
+            "timestamp": datetime.now().isoformat(),
+            "temp_c": data.temp_c,
+            "do_mgl": data.do_mgl,
+            "ph": data.ph,
+            "conductivity_uscm": data.conductivity_uscm,
+            "totalcoliform_mv": data.totalcoliform_mv
+        }
+        
+        iot_data_storage.append(iot_record)
+        
+        return {
+            "status": "success",
+            "message": "Data received from IoT device",
+            "data": iot_record,
+            "total_records": len(iot_data_storage)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/iot/latest")
+def get_latest_iot_data():
+    """
+    Endpoint untuk mendapatkan data IoT terbaru
+    
+    Frontend akan polling endpoint ini untuk mendapatkan data real-time
+    """
+    if len(iot_data_storage) == 0:
+        return {
+            "status": "no_data",
+            "message": "No IoT data available yet",
+            "data": None
+        }
+    
+    latest = iot_data_storage[-1]
+    return {
+        "status": "success",
+        "data": latest,
+        "total_records": len(iot_data_storage)
+    }
+
+@app.get("/iot/history")
+def get_iot_history(limit: int = 50):
+    """
+    Endpoint untuk mendapatkan history data IoT
+    
+    Parameter:
+    - limit: jumlah data terbaru yang diambil (default 50)
+    """
+    if len(iot_data_storage) == 0:
+        return {
+            "status": "no_data",
+            "message": "No IoT data available yet",
+            "data": []
+        }
+    
+    # Ambil data terbaru sebanyak limit
+    history = list(iot_data_storage)[-limit:]
+    
+    return {
+        "status": "success",
+        "data": history,
+        "count": len(history),
+        "total_records": len(iot_data_storage)
+    }
+
+@app.post("/iot/predict")
+def predict_from_iot():
+    """
+    Endpoint untuk auto-predict dari data IoT terbaru
+    
+    Akan otomatis mengambil data IoT terbaru dan melakukan prediksi
+    """
+    if len(iot_data_storage) == 0:
+        raise HTTPException(status_code=404, detail="No IoT data available")
+    
+    latest = iot_data_storage[-1]
+    
+    # Convert ke PredictRequest
+    req = PredictRequest(
+        temp_c=latest["temp_c"],
+        do_mgl=latest["do_mgl"],
+        ph=latest["ph"],
+        conductivity_uscm=latest["conductivity_uscm"],
+        totalcoliform_mpn_100ml=None
+    )
+    
+    # Gunakan endpoint predict yang sudah ada
+    result = predict(req)
+    
+    # Tambahkan info IoT
+    result["iot_timestamp"] = latest["timestamp"]
+    result["iot_source"] = "mappi32"
+    
+    return result
+
+@app.delete("/iot/clear")
+def clear_iot_data():
+    """
+    Endpoint untuk clear semua data IoT (untuk testing)
+    """
+    iot_data_storage.clear()
+    return {
+        "status": "success",
+        "message": "All IoT data cleared"
     }
