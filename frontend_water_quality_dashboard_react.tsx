@@ -14,7 +14,7 @@ import {
 } from "recharts";
 
 // ---- CONFIG ----
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"; // ganti ke URL cloud saat deploy
+const API_BASE = import.meta.env.VITE_API_BASE || "https://water-quality-ai-ejw2.onrender.com/";
 
 // Utility kecil
 const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
