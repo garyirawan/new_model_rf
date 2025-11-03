@@ -8,7 +8,7 @@ import joblib
 @dataclass
 class Thresholds:
     # Konfigurasi default (bisa diedit di runtime)
-    total_coliform_max_mpn_100ml: float = 0.0   # potabilitas ideal: 0 per 100 mL
+    total_coliform_max_mpn_100ml: float = 0.70  # toleransi untuk fluktuasi parameter (spare margin)
     ph_min: float = 6.5
     ph_max: float = 8.5
     conductivity_max_uscm: float = 1500.0       # kira-kira ~TDS 750-1000 mg/L (aproksimasi), ubah sesuai site

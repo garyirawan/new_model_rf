@@ -110,12 +110,14 @@ Content-Type: application/json
 
 ## 📈 Water Quality Thresholds
 
-| Parameter | Safe Range | Unit |
-|-----------|------------|------|
-| Total Coliform | 0 | MPN/100mL |
-| pH | 6.5 - 8.5 | - |
-| Conductivity | ≤ 1500 | µS/cm |
-| DO (info) | ≥ 5.0 | mg/L |
+| Parameter | Safe Range | Unit | Notes |
+|-----------|------------|------|-------|
+| Total Coliform | ≤ 0.70 | MPN/100mL | Toleransi untuk fluktuasi parameter |
+| pH | 6.5 - 8.5 | - | - |
+| Conductivity | ≤ 1500 | µS/cm | Indikasi TDS |
+| DO (info) | ≥ 5.0 | mg/L | Tidak memblok potabilitas |
+
+> **Update Nov 2025**: Threshold Total Coliform diubah dari 0.0 ke 0.70 MPN/100mL untuk memberikan spare margin terhadap fluktuasi keempat parameter input (temperature, DO, pH, conductivity).
 
 ## 🔧 Environment Variables
 

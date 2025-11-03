@@ -51,6 +51,14 @@ if (typeof document !== 'undefined') {
 const API_BASE = import.meta.env.VITE_API_BASE || "https://water-quality-ai-ejw2.onrender.com";
 const REFRESH_INTERVAL = 3600000; // Auto-refresh setiap 1 jam
 
+// Threshold (harus sama dengan backend inference_rf.py)
+const THRESHOLDS = {
+  total_coliform_max: 0.70, // MPN/100mL - toleransi untuk fluktuasi parameter
+  ph_min: 6.5,
+  ph_max: 8.5,
+  conductivity_max: 1500, // µS/cm
+};
+
 // Utility kecil
 const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
@@ -271,8 +279,11 @@ export default function WaterQualityDashboard() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const response = await res.json();
       
-      // Clear local state
+      // Clear local state - history table
       setIotHistory([]);
+      
+      // Reset grafik history
+      setHistory([]);
       
       // Refresh latest data (akan error 404 karena data kosong, tapi tidak masalah)
       setTemp(0);
@@ -283,6 +294,7 @@ export default function WaterQualityDashboard() {
       setLastUpdate("");
       setPrediction(null);
       setDecision(null);
+      setBadges(null);
       
       // Show success modal
       setSuccessMessage(`Berhasil menghapus ${recordCount} data history!`);
@@ -398,7 +410,7 @@ export default function WaterQualityDashboard() {
                   {prediction && (
                     <p className="text-sm mt-2 text-gray-600">
                       Prediksi Total Coliform: <span className="font-semibold">{fmt.format(prediction.total_coliform_mpn_100ml)} MPN/100mL</span>
-                      {" "}(Batas aman: 0 MPN/100mL)
+                      {" "}(Batas aman: ≤ {THRESHOLDS.total_coliform_max} MPN/100mL)
                     </p>
                   )}
                 </div>
