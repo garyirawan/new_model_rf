@@ -155,19 +155,25 @@ export default function WaterQualityDashboard() {
       const response = await res.json();
       const iotData = response.data; // Extract data dari response wrapper
       
-      // Update sensor readings
-      setTemp(iotData.temp_c);
-      setDoMgl(iotData.do_mgl);
-      setPh(iotData.ph);
-      setCond(iotData.conductivity_uscm);
-      setColiform(iotData.totalcoliform_mv);
-      setLastUpdate(formatDateWIB(iotData.timestamp));
+      // Validasi null/undefined
+      if (!iotData || typeof iotData !== 'object') {
+        throw new Error("Data IoT tidak valid atau kosong.");
+      }
+      
+      // Update sensor readings dengan null safety
+      setTemp(iotData.temp_c ?? 0);
+      setDoMgl(iotData.do_mgl ?? 0);
+      setPh(iotData.ph ?? 0);
+      setCond(iotData.conductivity_uscm ?? 0);
+      setColiform(iotData.totalcoliform_mv ?? 0);
+      setLastUpdate(iotData.timestamp ? formatDateWIB(iotData.timestamp) : "");
       
       // Auto-predict dengan data IoT terbaru
       await handlePredict(iotData);
       
     } catch (e: any) {
       setError(e.message || String(e));
+      console.error("Error fetching latest IoT data:", e);
     } finally {
       setLoading(false);
     }
@@ -176,10 +182,10 @@ export default function WaterQualityDashboard() {
   async function handlePredict(iotData?: any) {
     try {
       const body: any = {
-        temp_c: iotData ? iotData.temp_c : Number(temp),
-        do_mgl: iotData ? iotData.do_mgl : Number(doMgl),
-        ph: iotData ? iotData.ph : Number(ph),
-        conductivity_uscm: iotData ? iotData.conductivity_uscm : Number(cond),
+        temp_c: iotData ? (iotData.temp_c ?? 0) : Number(temp),
+        do_mgl: iotData ? (iotData.do_mgl ?? 0) : Number(doMgl),
+        ph: iotData ? (iotData.ph ?? 0) : Number(ph),
+        conductivity_uscm: iotData ? (iotData.conductivity_uscm ?? 0) : Number(cond),
       };
 
       const res = await fetch(`${API_BASE}/predict`, {
@@ -189,18 +195,23 @@ export default function WaterQualityDashboard() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      
+      // Validasi response
+      if (!data || !data.prediction || !data.ai_detection) {
+        throw new Error("Response API tidak valid.");
+      }
 
       setPrediction({
-        total_coliform_mpn_100ml: data.prediction.total_coliform_mpn_100ml,
-        ci90_low: data.prediction.ci90_low,
-        ci90_high: data.prediction.ci90_high,
+        total_coliform_mpn_100ml: data.prediction.total_coliform_mpn_100ml ?? 0,
+        ci90_low: data.prediction.ci90_low ?? 0,
+        ci90_high: data.prediction.ci90_high ?? 0,
       });
-      setBadges(data.status_badges);
+      setBadges(data.status_badges ?? {});
       setDecision({
-        potable: data.ai_detection.potable,
-        reasons: data.ai_detection.reasons,
-        recommendations: data.ai_detection.recommendations,
-        alternative_use: data.ai_detection.alternative_use,
+        potable: data.ai_detection.potable ?? false,
+        reasons: data.ai_detection.reasons ?? [],
+        recommendations: data.ai_detection.recommendations ?? [],
+        alternative_use: data.ai_detection.alternative_use ?? [],
       });
 
       const t = new Date();
@@ -208,13 +219,14 @@ export default function WaterQualityDashboard() {
         ...h.slice(-49), // keep last 49 points (max 50)
         {
           t: t.toLocaleTimeString([], { hour12: false }),
-          pred: data.prediction.total_coliform_mpn_100ml,
-          low: data.prediction.ci90_low,
-          high: data.prediction.ci90_high,
+          pred: data.prediction.total_coliform_mpn_100ml ?? 0,
+          low: data.prediction.ci90_low ?? 0,
+          high: data.prediction.ci90_high ?? 0,
         },
       ]);
     } catch (e: any) {
       setError(e.message || String(e));
+      console.error("Error during prediction:", e);
     }
   }
 

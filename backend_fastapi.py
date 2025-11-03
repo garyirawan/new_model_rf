@@ -58,7 +58,7 @@ class PredictRequest(BaseModel):
     totalcoliform_mpn_100ml: Optional[float] = Field(None, description="Measured Total Coliform (MPN/100mL), optional")
 
 class ThresholdRequest(BaseModel):
-    total_coliform_max_mpn_100ml: float = 0.0
+    total_coliform_max_mpn_100ml: float = 0.70
     ph_min: float = 6.5
     ph_max: float = 8.5
     conductivity_max_uscm: float = 1000.0
