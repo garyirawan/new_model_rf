@@ -48,7 +48,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ---- CONFIG ----
-const API_BASE = import.meta.env.VITE_API_BASE || "https://water-quality-ai-ejw2.onrender.com";
+const API_BASE = import.meta.env.VITE_API_BASE || "https://gary29-water-quality-ai.hf.space";
 const REFRESH_INTERVAL = 3600000; // Auto-refresh setiap 1 jam
 
 // Threshold (harus sama dengan backend inference_rf.py)

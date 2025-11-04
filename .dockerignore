@@ -1,0 +1,71 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Git
+.git/
+.gitignore
+
+# Environment files
+.env
+.env.local
+
+# Build artifacts
+dist/
+build/
+
+# Node.js / Frontend (tidak diperlukan di backend Docker)
+node_modules/
+frontend_water_quality_dashboard_react.tsx
+src/
+public/
+package.json
+package-lock.json
+tsconfig.json
+vite.config.ts
+vite-env.d.ts
+index.html
+main.tsx
+
+# Documentation (kecuali README.md)
+*.md
+!README.md
+md file/
+
+# Test files
+test_*.py
+test_*.ps1
+*_test.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Deployment scripts
+deploy.sh
+deploy.ps1
+Procfile
+runtime.txt
+
+# Arduino/IoT (tidak diperlukan di cloud)
+*.ino
+esp32_*.ino
+
+# Old model files (hanya gunakan yang improved)
+rf_total_coliform_log1p_skl172.joblib
+
+# App.py (tidak diperlukan, pakai backend_fastapi.py langsung)
+app.py
