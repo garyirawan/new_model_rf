@@ -48,34 +48,51 @@ if (typeof document !== 'undefined') {
 }
 
 // ---- CONFIG ----
-const API_BASE = import.meta.env.VITE_API_BASE || "https://gary29-water-quality-ai.hf.space";
+const API_BASE = "https://gary29-water-quality-ai.hf.space"; // Lokal testing (ganti ke HF URL saat deploy)
 const REFRESH_INTERVAL = 3600000; // Auto-refresh setiap 1 jam
 
-// Threshold (harus sama dengan backend inference_rf.py)
+// Threshold - Sistem 3 Tingkatan (Updated Nov 6, 2025)
 const THRESHOLDS = {
-  total_coliform_max: 0.70, // MPN/100mL - toleransi untuk fluktuasi parameter
+  // Total Coliform: Aman ≤0.70 | Waspada 0.70-0.99 | Bahaya ≥1.0
+  total_coliform_safe: 0.70,      // MPN/100mL
+  total_coliform_warning: 1.0,    // MPN/100mL
+  
+  // Suhu: Aman 10-35°C | Waspada 36-44°C | Aman tapi panas ≥45°C
+  temp_safe_min: 10,              // °C
+  temp_safe_max: 35,              // °C
+  temp_warning_min: 36,           // °C (zona E. coli)
+  temp_warning_max: 44,           // °C
+  temp_hot_safe: 45,              // °C (E. coli mati)
+  
+  // pH: Permenkes 2023
   ph_min: 6.5,
   ph_max: 8.5,
-  conductivity_max: 1500, // µS/cm
+  
+  // Konduktivitas: EPA Amerika
+  conductivity_max: 1000,         // µS/cm
+  
+  // DO: Aman ≥6 | Rendah 5-6 | Waspada <5
+  do_optimal: 6.0,                // mg/L
+  do_low: 5.0,                    // mg/L
 };
 
 // Utility kecil
 const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
-// Format tanggal dengan timezone WIB (Jakarta) - UTC+7
+// Format tanggal dengan timezone WIB (Jakarta)
 const formatDateWIB = (dateString: string) => {
   const date = new Date(dateString);
-  // Timestamp server dalam UTC, tambahkan 7 jam untuk WIB
-  const wibTime = new Date(date.getTime() + (7 * 60 * 60 * 1000));
+  // Backend sudah memberikan waktu lokal (WIB), tidak perlu konversi
   
-  return wibTime.toLocaleString('id-ID', {
+  return date.toLocaleString('id-ID', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false
+    hour12: false,
+    timeZone: 'Asia/Jakarta'  // Pastikan menggunakan timezone WIB
   });
 };
 const badgeStyle = (kind: string) => {
@@ -101,6 +118,7 @@ export default function WaterQualityDashboard() {
   const [ph, setPh] = useState<number>(0);
   const [cond, setCond] = useState<number>(0);
   const [coliform, setColiform] = useState<number>(0);
+  const [coliformMpn, setColiformMpn] = useState<number>(0); // Nilai terkonversi ke MPN/100mL
   const [lastUpdate, setLastUpdate] = useState<string>("");
 
   const [loading, setLoading] = useState(false);
@@ -120,6 +138,7 @@ export default function WaterQualityDashboard() {
     | null
     | {
         potable: boolean;
+        severity: string;  // "safe", "warning", "danger"
         reasons: string[];
         recommendations: string[];
         alternative_use: string[];
@@ -154,6 +173,7 @@ export default function WaterQualityDashboard() {
       }
       const response = await res.json();
       const iotData = response.data; // Extract data dari response wrapper
+      const iotBadges = response.badges; // Extract badges dari response
       
       // Validasi null/undefined
       if (!iotData || typeof iotData !== 'object') {
@@ -166,7 +186,13 @@ export default function WaterQualityDashboard() {
       setPh(iotData.ph ?? 0);
       setCond(iotData.conductivity_uscm ?? 0);
       setColiform(iotData.totalcoliform_mv ?? 0);
+      setColiformMpn(iotData.totalcoliform_mpn_100ml ?? 0); // Nilai terkonversi
       setLastUpdate(iotData.timestamp ? formatDateWIB(iotData.timestamp) : "");
+      
+      // Update badges jika ada (untuk coliform sensor)
+      if (iotBadges) {
+        setBadges(iotBadges);
+      }
       
       // Auto-predict dengan data IoT terbaru
       await handlePredict(iotData);
@@ -186,6 +212,8 @@ export default function WaterQualityDashboard() {
         do_mgl: iotData ? (iotData.do_mgl ?? 0) : Number(doMgl),
         ph: iotData ? (iotData.ph ?? 0) : Number(ph),
         conductivity_uscm: iotData ? (iotData.conductivity_uscm ?? 0) : Number(cond),
+        // Sertakan nilai coliform sensor (MPN/100mL) jika ada dari IoT
+        totalcoliform_mpn_100ml: iotData ? (iotData.totalcoliform_mpn_100ml ?? null) : null,
       };
 
       const res = await fetch(`${API_BASE}/predict`, {
@@ -206,9 +234,21 @@ export default function WaterQualityDashboard() {
         ci90_low: data.prediction.ci90_low ?? 0,
         ci90_high: data.prediction.ci90_high ?? 0,
       });
-      setBadges(data.status_badges ?? {});
+      
+      // Merge badges: gabungkan badge dari predict dengan badge yang sudah ada (dari IoT)
+      // Badge dari predict akan menimpa badge lama kecuali badge baru tidak ada
+      setBadges((prevBadges: any) => ({
+        ...prevBadges,  // Keep existing badges (termasuk totalcoliform_mpn_100ml dari IoT)
+        ...(data.status_badges ?? {}),  // Add/overwrite with new badges from predict
+      }));
+      
+      // Smart fallback untuk severity: jika potable=true maka safe, jika false maka warning
+      const potable = data.ai_detection.potable ?? false;
+      const severity = data.ai_detection.severity ?? (potable ? "safe" : "warning");
+      
       setDecision({
-        potable: data.ai_detection.potable ?? false,
+        potable: potable,
+        severity: severity,
         reasons: data.ai_detection.reasons ?? [],
         recommendations: data.ai_detection.recommendations ?? [],
         alternative_use: data.ai_detection.alternative_use ?? [],
@@ -340,7 +380,20 @@ export default function WaterQualityDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const gaugeValue = decision ? (decision.potable ? 100 : 0) : 0;
+  // Gauge value dengan 3 tingkat berdasarkan severity
+  const gaugeValue = decision 
+    ? (decision.severity === "safe" ? 100 : decision.severity === "warning" ? 50 : 0)
+    : 0;
+  
+  // Gauge color berdasarkan severity
+  const gaugeColor = decision
+    ? (decision.severity === "safe" ? "#22c55e" : decision.severity === "warning" ? "#f59e0b" : "#ef4444")
+    : "#9ca3af";
+  
+  // Gauge label berdasarkan severity
+  const gaugeLabel = decision
+    ? (decision.severity === "safe" ? "LAYAK MINUM" : decision.severity === "warning" ? "PERLU PERHATIAN" : "TIDAK LAYAK")
+    : "MEMUAT...";
 
   const card = (
     title: string,
@@ -362,6 +415,7 @@ export default function WaterQualityDashboard() {
   const bPH = badges?.ph as [string, string] | undefined;
   const bDO = badges?.do_mgl as [string, string] | undefined;
   const bCond = badges?.conductivity_uscm as [string, string] | undefined;
+  const bColiform = badges?.totalcoliform_mpn_100ml as [string, string] | undefined;
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
@@ -398,37 +452,79 @@ export default function WaterQualityDashboard() {
           </div>
         )}
 
-        {/* Status Kelayakan Air - Banner Besar */}
+        {/* Status Kelayakan Air - Banner Besar dengan 3 Tingkat Severity */}
         {decision && (
-          <div className={`mb-6 p-6 rounded-2xl shadow-lg ${decision.potable ? "bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300" : "bg-gradient-to-r from-red-50 to-rose-50 border-2 border-red-300"}`}>
+          <div className={`mb-6 p-6 rounded-2xl shadow-lg ${
+            decision.severity === "safe" 
+              ? "bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300"
+              : decision.severity === "warning"
+              ? "bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-400"
+              : "bg-gradient-to-r from-red-50 to-rose-50 border-2 border-red-300"
+          }`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className={`w-20 h-20 rounded-full flex items-center justify-center ${decision.potable ? "bg-green-500" : "bg-red-500"}`}>
+                <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
+                  decision.severity === "safe" 
+                    ? "bg-green-500" 
+                    : decision.severity === "warning"
+                    ? "bg-amber-500"
+                    : "bg-red-500"
+                }`}>
                   <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    {decision.potable ? (
+                    {decision.severity === "safe" ? (
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    ) : decision.severity === "warning" ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     ) : (
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     )}
                   </svg>
                 </div>
                 <div>
-                  <h2 className={`text-3xl font-bold ${decision.potable ? "text-green-700" : "text-red-700"}`}>
-                    {decision.potable ? "AIR LAYAK MINUM" : "AIR TIDAK LAYAK MINUM"}
+                  <h2 className={`text-3xl font-bold ${
+                    decision.severity === "safe" 
+                      ? "text-green-700" 
+                      : decision.severity === "warning"
+                      ? "text-amber-700"
+                      : "text-red-700"
+                  }`}>
+                    {decision.severity === "safe" 
+                      ? "AIR LAYAK MINUM" 
+                      : decision.severity === "warning"
+                      ? "AIR PERLU PERHATIAN"
+                      : "AIR TIDAK LAYAK MINUM"
+                    }
                   </h2>
-                  <p className={`text-lg mt-1 ${decision.potable ? "text-green-600" : "text-red-600"}`}>
-                    {decision.potable ? "✓ Aman untuk dikonsumsi" : "⚠ Perlu pengolahan lebih lanjut"}
+                  <p className={`text-lg mt-1 ${
+                    decision.severity === "safe" 
+                      ? "text-green-600" 
+                      : decision.severity === "warning"
+                      ? "text-amber-600"
+                      : "text-red-600"
+                  }`}>
+                    {decision.severity === "safe" 
+                      ? "✓ Aman untuk dikonsumsi" 
+                      : decision.severity === "warning"
+                      ? "⚠ Waspada - Perlu treatment ringan"
+                      : "✗ Bahaya - Tidak boleh dikonsumsi"
+                    }
                   </p>
                   {prediction && (
                     <p className="text-sm mt-2 text-gray-600">
                       Prediksi Total Coliform: <span className="font-semibold">{fmt.format(prediction.total_coliform_mpn_100ml)} MPN/100mL</span>
-                      {" "}(Batas aman: ≤ {THRESHOLDS.total_coliform_max} MPN/100mL)
+                      {" "}(Aman: ≤0.70, Waspada: 0.71-0.99, Bahaya: ≥1.0)
                     </p>
                   )}
                 </div>
               </div>
-              <div className={`text-6xl font-bold ${decision.potable ? "text-green-400" : "text-red-400"}`}>
-                {decision.potable ? "✓" : "✗"}
+              <div className={`text-6xl font-bold ${
+                decision.severity === "safe" 
+                  ? "text-green-400" 
+                  : decision.severity === "warning"
+                  ? "text-amber-400"
+                  : "text-red-400"
+              }`}>
+                {decision.severity === "safe" ? "✓" : decision.severity === "warning" ? "⚠" : "✗"}
               </div>
             </div>
           </div>
@@ -442,18 +538,22 @@ export default function WaterQualityDashboard() {
             {card("Dissolved Oxygen (DO)", fmt.format(doMgl), "mg/L", bDO)}
             {card("pH", fmt.format(ph), "", bPH)}
             {card("Konduktivitas", fmt.format(cond), "µS/cm", bCond)}
-            {card("Total Coliform (Sensor)", fmt.format(coliform), "mV")}
+            {card("Total Coliform (Sensor)", fmt.format(coliformMpn), "MPN/100mL", bColiform)}
             <div className="rounded-2xl shadow-sm p-4 bg-white border border-gray-100">
               <div className="text-gray-500 text-sm mb-2">Status Kelayakan</div>
               <div className="h-24">
                 <ResponsiveContainer width="100%" height="100%">
                   <RadialBarChart innerRadius="70%" outerRadius="100%" data={[{ name: "score", value: gaugeValue }]} startAngle={180} endAngle={0}>
-                    <RadialBar background dataKey="value" fill={gaugeValue===100?"#22c55e":"#ef4444"} />
+                    <RadialBar background dataKey="value" fill={gaugeColor} />
                   </RadialBarChart>
                 </ResponsiveContainer>
               </div>
-              <div className={`text-center text-sm font-bold ${gaugeValue===100?"text-green-600":"text-red-600"}`}>
-                {gaugeValue===100?"LAYAK MINUM":"TIDAK LAYAK"}
+              <div className={`text-center text-xs font-bold ${
+                decision?.severity === "safe" ? "text-green-600" 
+                : decision?.severity === "warning" ? "text-amber-600" 
+                : "text-red-600"
+              }`}>
+                {gaugeLabel}
               </div>
             </div>
           </div>
@@ -599,7 +699,7 @@ export default function WaterQualityDashboard() {
                       <td className="text-center py-3 px-4">{fmt.format(item.do_mgl)}</td>
                       <td className="text-center py-3 px-4">{fmt.format(item.ph)}</td>
                       <td className="text-center py-3 px-4">{fmt.format(item.conductivity_uscm)}</td>
-                      <td className="text-center py-3 px-4">{fmt.format(item.totalcoliform_mv)}</td>
+                      <td className="text-center py-3 px-4">{fmt.format(item.totalcoliform_mpn_100ml ?? 0)}</td>
                       <td className="text-center py-3 px-4 font-semibold">
                         {item.prediction !== null ? (
                           <span className={`${item.prediction > 0 ? 'text-red-600' : 'text-green-600'}`}>
