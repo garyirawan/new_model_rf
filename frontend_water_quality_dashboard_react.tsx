@@ -294,6 +294,7 @@ export default function WaterQualityDashboard() {
               do_mgl: item.do_mgl,
               ph: item.ph,
               conductivity_uscm: item.conductivity_uscm,
+              totalcoliform_mpn_100ml: item.totalcoliform_mpn_100ml,  // KIRIM sensor ke backend untuk priority logic
             };
             const predictRes = await fetch(`${API_BASE}/predict`, {
               method: "POST",
@@ -693,7 +694,7 @@ export default function WaterQualityDashboard() {
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">DO<br/>(mg/L)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">pH</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Konduktivitas<br/>(µS/cm)</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700">Total Coliform<br/>(MPN/100mL)</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700">Total Coliform (Sensor)<br/>(MPN/100mL)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Prediksi AI<br/>(MPN/100mL)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Status</th>
                   </tr>
