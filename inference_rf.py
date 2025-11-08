@@ -44,7 +44,7 @@ class InferenceOutput:
 @dataclass
 class DetectionDecision:
     potable: bool
-    severity: str  # "safe", "warning", "danger"
+    severity: str
     reasons: List[str]
     recommendations: List[str]
     alternative_use: List[str]
@@ -252,7 +252,7 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
         badges["temp_c"] = ("optimal", f"Aman {temp:.1f}°C")
     elif thresholds.temp_warning_min_c <= temp <= thresholds.temp_warning_max_c:
         # WASPADA: 36-44°C (oranye) - zona E. coli
-        badges["temp_c"] = ("warning", f"⚠️ Waspada         {card("Suhu", fmt.format(temp), "°C", bTemp)}{temp:.1f}°C")
+        badges["temp_c"] = ("warning", f"⚠️ Waspada {temp:.1f}°C")
     elif temp >= thresholds.temp_hot_safe_c:
         # WASPADA: ≥45°C (oranye) - panas, perlu dinginkan
         badges["temp_c"] = ("warning", f"⚠️ Terlalu panas {temp:.1f}°C")
