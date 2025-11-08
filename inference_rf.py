@@ -8,10 +8,10 @@ import joblib
 @dataclass
 class Thresholds:
     # === TOTAL COLIFORM (3 Tingkat) ===
-    # Aman: ≤0.70 | Waspada: 0.70-0.99 | Bahaya: ≥1.0
-    total_coliform_safe_mpn_100ml: float = 0.70      # Aman untuk prediksi AI
-    total_coliform_warning_mpn_100ml: float = 1.0    # Waspada, perlu treatment
-    # total_coliform_danger >= 1.0                    # Bahaya, tidak boleh konsumsi
+    # Aman: ≤0.70 | Waspada: 0.71-0.99 | Bahaya: ≥1.0
+    total_coliform_safe_mpn_100ml: float = 0.70      # Batas atas AMAN (≤0.70)
+    total_coliform_danger_mpn_100ml: float = 1.0     # Batas bawah BAHAYA (≥1.0)
+    # WASPADA = antara 0.70 dan 1.0 (0.71-0.99)
     
     # === SUHU (3 Tingkat) ===
     # Aman: 10-35°C | Waspada: 36-44°C (zona E. coli) | Aman tapi panas: ≥45°C
@@ -95,22 +95,31 @@ def decide_potability(readings: Dict[str, float],
     recs = []
     alt = []
 
-    # Pilih coliform yang digunakan untuk keputusan: prioritas nilai terukur jika ada
-    coliform = readings.get("totalcoliform_mpn_100ml", None)
-    col_for_decision = coliform if coliform is not None else predicted_coliform_mpn_100ml
+    # PENTING: Prioritas keputusan potabilitas
+    # 1. Jika SENSOR Total Coliform ada nilai terukur (> 0) → PRIORITAS SENSOR
+    # 2. Jika sensor = 0 atau None → Pakai PREDIKSI AI
+    # Alasan: Jika sensor mendeteksi coliform aktual, itu data real-time yang harus diprioritaskan
+    sensor_coliform = readings.get("totalcoliform_mpn_100ml", None)
+    
+    if sensor_coliform is not None and sensor_coliform > 0:
+        # SENSOR ADA NILAI TERUKUR → Pakai sensor (data real)
+        col_for_decision = sensor_coliform
+    else:
+        # SENSOR 0 atau None → Pakai PREDIKSI AI (lebih reliable dari sensor mV)
+        col_for_decision = predicted_coliform_mpn_100ml
 
     # --- Aturan potabilitas dengan sistem 3 tingkatan ---
     
-    # 1. Total Coliform (3 Tingkat: Aman ≤0.70 | Waspada 0.70-0.99 | Bahaya ≥1.0)
+    # 1. Total Coliform (3 Tingkat: Aman ≤0.70 | Waspada 0.71-0.99 | Bahaya ≥1.0)
     if col_for_decision is None:
         reasons.append("Tidak ada nilai coliform (terukur/prediksi). Keputusan potabilitas tidak pasti.")
     else:
-        if col_for_decision >= thresholds.total_coliform_warning_mpn_100ml:
+        if col_for_decision >= thresholds.total_coliform_danger_mpn_100ml:
             # BAHAYA: ≥1.0 MPN/100mL
             reasons.append(f"Total Coliform {col_for_decision:.2f} MPN/100mL - BAHAYA (≥1.0), tidak boleh dikonsumsi")
         elif col_for_decision > thresholds.total_coliform_safe_mpn_100ml:
-            # WASPADA: 0.70-0.99 MPN/100mL
-            reasons.append(f"Total Coliform {col_for_decision:.2f} MPN/100mL - WASPADA (0.70-0.99), perlu treatment sebelum konsumsi")
+            # WASPADA: 0.71-0.99 MPN/100mL
+            reasons.append(f"Total Coliform {col_for_decision:.2f} MPN/100mL - WASPADA (0.71-0.99), perlu treatment sebelum konsumsi")
         # AMAN: ≤0.70 (tidak masuk reasons)
 
     # 2. Suhu (3 Tingkat: Aman 10-35°C | Waspada 36-44°C | Aman tapi panas ≥45°C)
@@ -155,7 +164,7 @@ def decide_potability(readings: Dict[str, float],
     if not potable:
         # Total Coliform
         if col_for_decision is not None:
-            if col_for_decision >= thresholds.total_coliform_warning_mpn_100ml:
+            if col_for_decision >= thresholds.total_coliform_danger_mpn_100ml:
                 # BAHAYA: ≥1.0
                 recs += [
                     "TIDAK BOLEH DIKONSUMSI - Total Coliform ≥1.0 MPN/100mL",
@@ -164,9 +173,9 @@ def decide_potability(readings: Dict[str, float],
                     "Telusuri sumber kontaminasi (sanitasi, pipa bocor, intrusi)"
                 ]
             elif col_for_decision > thresholds.total_coliform_safe_mpn_100ml:
-                # WASPADA: 0.70-0.99
+                # WASPADA: 0.71-0.99
                 recs += [
-                    "PERLU TREATMENT - Total Coliform 0.70-0.99 MPN/100mL",
+                    "PERLU TREATMENT - Total Coliform 0.71-0.99 MPN/100mL",
                     "Boiling (pendidihan 100°C) sebelum konsumsi",
                     "Atau gunakan filter bersertifikat NSF untuk bakteri",
                     "Monitor kualitas air secara berkala"
@@ -202,26 +211,48 @@ def decide_potability(readings: Dict[str, float],
                 # RENDAH: 5-6
                 recs.append(f"DO rendah ({do:.1f} mg/L): Aerasi ringan untuk meningkatkan ke ≥6 mg/L")
 
-    # --- Tentukan severity level berdasarkan reasons ---
+    # --- Tentukan severity level berdasarkan SEMUA PARAMETER ---
     severity = "safe"  # Default: aman
     
     if not potable:
-        # Cek apakah ada keyword BAHAYA di reasons
-        has_danger = any("BAHAYA" in r for r in reasons)
-        # Cek apakah ada keyword WASPADA di reasons
-        has_warning = any("WASPADA" in r or "Rendah" in r or "terlalu" in r or "di luar" in r or "sedikit" in r for r in reasons)
+        # PRIORITAS 1: Cek Total Coliform (PREDIKSI AI) - paling kritis
+        coliform_severity = None
+        if col_for_decision is not None:
+            if col_for_decision >= thresholds.total_coliform_danger_mpn_100ml:
+                coliform_severity = "danger"  # ≥1.0 MPN/100mL
+            elif col_for_decision > thresholds.total_coliform_safe_mpn_100ml:
+                coliform_severity = "warning"  # 0.71-0.99 MPN/100mL
         
-        if has_danger:
+        # PRIORITAS 2: Cek DO (parameter kedua paling kritis)
+        do_severity = None
+        if do is not None and do < thresholds.do_low_mgl:
+            do_severity = "danger"  # DO <5 mg/L = bahaya
+        
+        # PRIORITAS 3: Cek parameter lain (temp, pH, conductivity)
+        other_severity = None
+        # Suhu zona E. coli = warning
+        if temp is not None and (thresholds.temp_warning_min_c <= temp <= thresholds.temp_warning_max_c):
+            other_severity = "warning"
+        # pH di luar range = warning
+        if ph is not None and (ph < thresholds.ph_min or ph > thresholds.ph_max):
+            other_severity = "warning"
+        # Conductivity tinggi = warning
+        if cond is not None and cond > thresholds.conductivity_max_uscm:
+            other_severity = "warning"
+        
+        # GABUNGKAN: Ambil severity tertinggi dari semua parameter
+        # Hierarchy: danger > warning > safe
+        if coliform_severity == "danger" or do_severity == "danger":
             severity = "danger"  # Ada parameter bahaya
-        elif has_warning:
-            severity = "warning"  # Hanya ada parameter waspada/rendah
+        elif coliform_severity == "warning" or other_severity == "warning":
+            severity = "warning"  # Ada parameter waspada
         else:
-            severity = "warning"  # Default untuk not potable adalah warning
+            severity = "warning"  # Default untuk not potable
     
     # --- Alternative use suggestion (jika tidak potable untuk konsumsi) ---
     if not potable:
         # Jika masalah utama adalah coliform tinggi (≥1.0), hanya untuk non-konsumsi
-        if col_for_decision is not None and col_for_decision >= thresholds.total_coliform_warning_mpn_100ml:
+        if col_for_decision is not None and col_for_decision >= thresholds.total_coliform_danger_mpn_100ml:
             alt.append("Irigasi tanaman non-pangan (bukan untuk sayuran/buah)")
             alt.append("Pembersihan/pencucian umum (bukan untuk mencuci pangan)")
         else:
@@ -305,7 +336,7 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
     elif coliform <= thresholds.total_coliform_safe_mpn_100ml:
         # AMAN: ≤0.70 MPN/100mL (hijau)
         badges["totalcoliform_mpn_100ml"] = ("optimal", f"Aman {coliform:.2f} MPN/100mL")
-    elif coliform < thresholds.total_coliform_warning_mpn_100ml:
+    elif coliform < thresholds.total_coliform_danger_mpn_100ml:
         # WASPADA: 0.71-0.99 MPN/100mL (kuning/oranye)
         badges["totalcoliform_mpn_100ml"] = ("warning", f"⚠️ Waspada {coliform:.2f} MPN/100mL")
     else:

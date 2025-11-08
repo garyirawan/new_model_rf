@@ -48,7 +48,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ---- CONFIG ----
-const API_BASE = "https://gary29-water-quality-ai.hf.space"; // Lokal testing (ganti ke HF URL saat deploy)
+const API_BASE = "http://localhost:8000"; // Lokal testing (ganti ke HF URL saat deploy)
 const REFRESH_INTERVAL = 3600000; // Auto-refresh setiap 1 jam
 
 // Threshold - Sistem 3 Tingkatan (Updated Nov 6, 2025)
@@ -306,12 +306,14 @@ export default function WaterQualityDashboard() {
               ...item,
               prediction: predictData.prediction.total_coliform_mpn_100ml,
               potable: predictData.ai_detection.potable,
+              severity: predictData.ai_detection.severity,  // TAMBAHKAN severity (safe/warning/danger)
             };
           } catch (e) {
             return {
               ...item,
               prediction: null,
               potable: null,
+              severity: null,  // TAMBAHKAN null jika error
             };
           }
         })
@@ -718,13 +720,15 @@ export default function WaterQualityDashboard() {
                         )}
                       </td>
                       <td className="text-center py-3 px-4">
-                        {item.potable !== null ? (
+                        {item.severity !== null ? (
                           <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
-                            item.potable 
-                              ? 'bg-green-100 text-green-700' 
-                              : 'bg-red-100 text-red-700'
+                            item.severity === 'safe'
+                              ? 'bg-green-500 text-white' 
+                              : item.severity === 'warning'
+                              ? 'bg-orange-500 text-white'
+                              : 'bg-red-500 text-white'
                           }`}>
-                            {item.potable ? '✓ Layak' : '✗ Tidak Layak'}
+                            {item.severity === 'safe' ? '🟢 Aman' : item.severity === 'warning' ? '🟡 Waspada' : '🔴 Bahaya'}
                           </span>
                         ) : (
                           <span className="text-gray-400">-</span>

@@ -52,9 +52,9 @@ app = FastAPI(
     
     ## Threshold Sistem 3-Tier:
 
-    - 🟢 Safe (Aman): Semua parameter dalam batas aman
-    - 🟡 Warning (Waspada): Satu atau lebih parameter di zona waspada
-    - 🔴 Danger (Bahaya): Parameter kritis melewati batas waspada
+    - 🟢 Safe (Aman): Semua parameter dalam batas aman (Dengan prediksi MPN berada di angka ≤0.70 MPN/100ml)
+    - 🟡 Warning (Waspada): Satu atau lebih parameter di zona waspada (Dengan prediksi MPN berada di angka  0.71-0.99 MPN/100ml)
+    - 🔴 Danger (Bahaya): Parameter kritis melewati batas ambang waspada (Dengan prediksi MPN berada di angka  ≥1.0 MPN/100ml)
     """,
     version="2.0.0",
     contact={
@@ -150,9 +150,9 @@ class ThresholdRequest(BaseModel):
     """
     Schema untuk konfigurasi threshold sistem 3-tier.
     
-    **Sistem 3-Tier** (Updated Nov 6, 2025):
+    **Sistem 3-Tier** (Updated Nov 8, 2025):
     - 🟢 **Safe (Aman)**: Total Coliform ≤ 0.70 MPN/100mL
-    - 🟡 **Warning (Waspada)**: Total Coliform 0.70 - 0.99 MPN/100mL
+    - 🟡 **Warning (Waspada)**: Total Coliform 0.71 - 0.99 MPN/100mL
     - 🔴 **Danger (Bahaya)**: Total Coliform ≥ 1.0 MPN/100mL
     
     **Threshold untuk parameter lain**:
@@ -161,9 +161,9 @@ class ThresholdRequest(BaseModel):
     - pH: <6.5 atau >8.5 (Warning), <6.0 atau >9.0 (Danger)
     - Conductivity: <50 atau >1500 μS/cm (Warning), <30 atau >2000 μS/cm (Danger)
     """
-    # Total Coliform: Aman ≤0.70 | Waspada 0.70-0.99 | Bahaya ≥1.0
+    # Total Coliform: Aman ≤0.70 | Waspada 0.71-0.99 | Bahaya ≥1.0
     total_coliform_safe_mpn_100ml: float = 0.70
-    total_coliform_warning_mpn_100ml: float = 1.0
+    total_coliform_danger_mpn_100ml: float = 1.0
     
     # Suhu: Aman 10-35°C | Waspada 36-44°C (E. coli) | Aman tapi panas ≥45°C
     temp_safe_min_c: float = 10.0
@@ -336,10 +336,9 @@ def predict(req: PredictRequest):
     decision = decide_potability(readings, infer.pred_total_coliform_mpn_100ml, thresholds)
 
     # 3) Badge status per parameter
-    # Tambahkan prediksi coliform ke readings untuk badge (jika tidak ada nilai terukur)
+    # Badge SEMUA parameter (termasuk Total Coliform) ikut nilai ASLI dari sensor/readings
+    # Badge Total Coliform ikut SENSOR (bukan prediksi AI)
     readings_for_badge = dict(readings)
-    if "totalcoliform_mpn_100ml" not in readings_for_badge:
-        readings_for_badge["totalcoliform_mpn_100ml"] = infer.pred_total_coliform_mpn_100ml
     badges = status_badges(readings_for_badge, thresholds)
 
     # 4) Response
