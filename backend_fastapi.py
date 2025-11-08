@@ -19,7 +19,66 @@ MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(HERE, "rf_total_coliform_log1p
 FEATURES_ORDER_PATH = os.getenv("FEATURES_ORDER_PATH", os.path.join(HERE, "model_features_order.txt"))
 
 # Inisialisasi app & model sekali di startup
-app = FastAPI(title="Water Quality AI API", version="1.0")
+app = FastAPI(
+    title="Water Quality AI Monitoring API",
+    description="""
+    🚰 API untuk Monitoring Kualitas Air Berbasis AI dan IoT
+    
+    API ini menyediakan layanan prediksi kualitas air menggunakan Machine Learning (Random Forest) 
+    dan integrasi dengan sensor IoT (ESP32/Mappi32) untuk monitoring real-time.
+    
+    ## Fitur Utama:
+    
+    * AI Prediction: Prediksi Total Coliform (MPN/100mL) dari parameter fisiko-kimia
+    * IoT Integration: Menerima dan menyimpan data dari sensor real-time
+    * 3-Tier Severity System: Klasifikasi kualitas air (Aman/Waspada/Bahaya)
+    * Status Badges: Badge berwarna untuk setiap parameter air
+    * History Storage: Penyimpanan data historis (in-memory, max 1000 records)
+    
+    ## Data Flow:
+    
+    1. Hardware → API ESP32 POST data sensor ke `/iot/data`
+    2. API → Storage Data disimpan di in-memory deque (maxlen=1000)
+    3. Frontend → API Dashboard polling `/iot/latest` dan `/iot/history`
+    4. AI Processing `/predict` atau `/iot/predict` untuk analisis kualitas air
+    
+    ## Parameter Air yang Dimonitor:
+    
+    - Temperature (°C): 10-35°C (optimal)
+    - Dissolved Oxygen (mg/L): ≥6 mg/L (layak)
+    - pH 6.5-8.5 (netral)
+    - Conductivity (μS/cm): 0-1000 μS/cm (normal)
+    - Total Coliform (MPN/100mL): <1 MPN/100mL (aman)
+    
+    ## Threshold Sistem 3-Tier:
+
+    - 🟢 Safe (Aman): Semua parameter dalam batas aman
+    - 🟡 Warning (Waspada): Satu atau lebih parameter di zona waspada
+    - 🔴 Danger (Bahaya): Parameter kritis melewati batas waspada
+    """,
+    version="2.0.0",
+    contact={
+        "name": "Water Quality AI Team",
+        "url": "https://github.com/garyirawan/new_model_rf",
+    },
+    license_info={
+        "name": "",
+    },
+    tags_metadata=[
+        {
+            "name": "System",
+            "description": "Health check dan monitoring sistem API",
+        },
+        {
+            "name": "AI Prediction",
+            "description": "Endpoint untuk prediksi kualitas air menggunakan Machine Learning",
+        },
+        {
+            "name": "IoT Data Management",
+            "description": "Endpoint untuk integrasi dengan sensor IoT (ESP32/Mappi32)",
+        },
+    ]
+)
 
 # Add CORS middleware
 app.add_middleware(
@@ -43,22 +102,65 @@ def _load_model():
 # ====== DATA MODELS ======
 
 class IoTDataInput(BaseModel):
-    """Data dari ESP32/Mappi32"""
+    """
+    Schema untuk data dari ESP32/Mappi32 sensor IoT.
+    
+    Data sensor dikirim via POST ke endpoint `/iot/data`.
+    Total Coliform dalam bentuk mV akan otomatis dikonversi ke MPN/100mL.
+    
+    **Formula konversi**: MPN/100mL = mV / 100
+    
+    **Rentang Normal**:
+    - Temperature: 20-30°C
+    - DO: 6-8 mg/L
+    - pH: 6.5-8.5
+    - Conductivity: 50-1500 μS/cm
+    - Total Coliform mV: 0-1000 mV (0-10 MPN/100mL setelah konversi)
+    """
     temp_c: float = Field(..., description="Temperature in °C", example=27.8)
     do_mgl: float = Field(..., description="Dissolved Oxygen in mg/L", example=6.2)
-    ph: float = Field(..., description="pH", example=7.2)
+    ph: float = Field(..., description="pH level", example=7.2)
     conductivity_uscm: float = Field(..., description="Conductivity in µS/cm", example=620)
-    totalcoliform_mv: Optional[float] = Field(None, description="Total Coliform sensor reading in mV (optional)")
+    totalcoliform_mv: Optional[float] = Field(None, description="Total Coliform sensor reading in mV (will be converted to MPN/100mL)", example=50.0)
 
 class PredictRequest(BaseModel):
-    temp_c: float = Field(..., description="Temperature in °C")
-    do_mgl: float = Field(..., description="Dissolved Oxygen in mg/L")
-    ph: float = Field(..., description="pH")
-    conductivity_uscm: float = Field(..., description="Conductivity in µS/cm")
-    totalcoliform_mpn_100ml: Optional[float] = Field(None, description="Measured Total Coliform (MPN/100mL), optional")
+    """
+    Schema untuk request prediksi kualitas air menggunakan AI.
+    
+    Endpoint `/predict` menerima 4 parameter wajib (fisiko-kimia) dan 1 parameter opsional.
+    Model AI akan memprediksi Total Coliform jika tidak disediakan.
+    
+    **Use Case**:
+    - **Prediksi penuh**: Kirim 4 parameter → AI prediksi Total Coliform
+    - **Validasi sensor**: Kirim 4 parameter + totalcoliform_mpn_100ml → AI bandingkan dengan pengukuran aktual
+    
+    **Parameter Wajib**:
+    - Temperature, DO, pH, Conductivity
+    
+    **Parameter Opsional**:
+    - Total Coliform (MPN/100mL) dari sensor atau lab test
+    """
+    temp_c: float = Field(..., description="Temperature in °C", example=27.8)
+    do_mgl: float = Field(..., description="Dissolved Oxygen in mg/L", example=6.2)
+    ph: float = Field(..., description="pH level", example=7.2)
+    conductivity_uscm: float = Field(..., description="Conductivity in µS/cm", example=620)
+    totalcoliform_mpn_100ml: Optional[float] = Field(None, description="Measured Total Coliform (MPN/100mL) - optional, akan diprediksi jika tidak ada", example=0.5)
 
 class ThresholdRequest(BaseModel):
-    # Updated Nov 6, 2025 - Sistem 3 Tingkatan
+    """
+    Schema untuk konfigurasi threshold sistem 3-tier.
+    
+    **Sistem 3-Tier** (Updated Nov 6, 2025):
+    - 🟢 **Safe (Aman)**: Total Coliform ≤ 0.70 MPN/100mL
+    - 🟡 **Warning (Waspada)**: Total Coliform 0.70 - 0.99 MPN/100mL
+    - 🔴 **Danger (Bahaya)**: Total Coliform ≥ 1.0 MPN/100mL
+    
+    **Threshold untuk parameter lain**:
+    - Temperature: <20°C atau >30°C (Warning), <15°C atau >35°C (Danger)
+    - DO: <6 mg/L (Warning), <4 mg/L (Danger)
+    - pH: <6.5 atau >8.5 (Warning), <6.0 atau >9.0 (Danger)
+    - Conductivity: <50 atau >1500 μS/cm (Warning), <30 atau >2000 μS/cm (Danger)
+    """
     # Total Coliform: Aman ≤0.70 | Waspada 0.70-0.99 | Bahaya ≥1.0
     total_coliform_safe_mpn_100ml: float = 0.70
     total_coliform_warning_mpn_100ml: float = 1.0
@@ -81,12 +183,138 @@ class ThresholdRequest(BaseModel):
     do_optimal_mgl: float = 6.0
     do_low_mgl: float = 5.0
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["System"],
+    summary="Health Check",
+    response_description="Status sistem API"
+)
 def health():
+    """
+    ## Health Check Endpoint
+    
+    Endpoint untuk mengecek status sistem API.
+    
+    **Use Case**:
+    - Monitoring uptime sistem
+    - Load balancer health check
+    - CI/CD deployment verification
+    
+    **Response**:
+    ```json
+    {
+        "status": "ok"
+    }
+    ```
+    
+    **Status Codes**:
+    - `200 OK`: API berjalan normal
+    """
     return {"status": "ok"}
 
-@app.post("/predict")
+@app.post(
+    "/predict",
+    tags=["AI Prediction"],
+    summary="Prediksi Kualitas Air dengan AI (Manual Input)",
+    response_description="Hasil prediksi AI dengan analisis kelayakan air"
+)
 def predict(req: PredictRequest):
+    """
+    ## AI Water Quality Prediction (Manual Input)
+    
+    Endpoint untuk prediksi kualitas air dengan **INPUT MANUAL** dari user.
+    
+    ---
+    
+    ### 🔀 **Perbedaan `/predict` vs `/iot/predict`:**
+    
+    | Aspek | `/predict` (Endpoint ini) | `/iot/predict` |
+    |-------|---------------------------|----------------|
+    | **Input** | ✅ Manual (kirim parameter) | ❌ Auto (ambil dari sensor) |
+    | **Request Body** | ✅ Required | ❌ Empty |
+    | **Use Case** | Testing, simulasi, lab validation | Real-time monitoring, automation |
+    | **User** | Human (researcher, technician) | Machine (scheduler, automation) |
+    
+    ### ✅ **Kapan Pakai `/predict` (Endpoint Ini):**
+    - 🧪 **Testing & Simulasi**: Coba berbagai skenario parameter "what-if"
+    - 📝 **Manual Input**: User input langsung dari web form/dashboard
+    - 🔬 **Lab Validation**: Bandingkan hasil lab test dengan prediksi AI
+    - 💻 **API Integration**: Testing untuk aplikasi eksternal
+    - 📊 **Research**: Analisis parameter untuk riset kualitas air
+    
+    ### ❌ **Jangan Pakai `/predict` Jika:**
+    - Data sudah ada di sensor IoT → Pakai `/iot/predict` (lebih mudah, 1 API call)
+    - Butuh automation periodik → Pakai `/iot/predict` (no input needed)
+    
+    ---
+    
+    **Fitur**:
+    - Prediksi Total Coliform (MPN/100mL) dari 4 parameter fisiko-kimia
+    - Analisis kelayakan air dengan sistem 3-tier (Safe/Warning/Danger)
+    - Status badge untuk setiap parameter
+    - Confidence interval 90% untuk prediksi
+    - Rekomendasi tindakan berdasarkan kualitas air
+    
+    **Input Parameters (WAJIB kirim via request body)**:
+    - `temp_c`: Suhu air (°C) - Contoh: 27.8
+    - `do_mgl`: Dissolved Oxygen (mg/L) - Contoh: 6.2
+    - `ph`: pH level - Contoh: 7.2
+    - `conductivity_uscm`: Konduktivitas (µS/cm) - Contoh: 620
+    - `totalcoliform_mpn_100ml` (opsional): Nilai terukur Total Coliform
+    
+    **Response Structure**:
+    ```json
+    {
+        "input_used": {
+            "temp_c": 27.8,
+            "do_mgl": 6.2,
+            "ph": 7.2,
+            "conductivity_uscm": 620
+        },
+        "prediction": {
+            "total_coliform_mpn_100ml": 0.45,
+            "ci90_low": 0.20,
+            "ci90_high": 0.85,
+            "disclaimer": "Estimasi AI berbasis 4 parameter fisiko-kimia (bukan hasil uji lab)."
+        },
+        "ai_detection": {
+            "potable": true,
+            "severity": "safe",
+            "reasons": ["Total Coliform rendah (0.45 MPN/100mL)"],
+            "recommendations": ["Air aman untuk diminum"],
+            "alternative_use": null,
+            "thresholds": {...}
+        },
+        "status_badges": {
+            "temp_c": {"status": "safe", "color": "green", "label": "Normal"},
+            "do_mgl": {"status": "safe", "color": "green", "label": "Optimal"},
+            ...
+        }
+    }
+    ```
+    
+    **Severity Levels**:
+    - `safe`: Semua parameter aman (air layak minum)
+    - `warning`: Ada parameter di zona peringatan (perlu monitoring)
+    - `danger`: Parameter kritis berbahaya (air tidak layak)
+    
+    **Example Request**:
+    ```bash
+    curl -X POST "http://localhost:8000/predict" \\
+         -H "Content-Type: application/json" \\
+         -d '{
+           "temp_c": 27.8,
+           "do_mgl": 6.2,
+           "ph": 7.2,
+           "conductivity_uscm": 620
+         }'
+    ```
+    
+    **Status Codes**:
+    - `200 OK`: Prediksi berhasil
+    - `422 Validation Error`: Parameter tidak valid
+    - `500 Internal Server Error`: Error pada model AI
+    """
     # Use default thresholds
     th = ThresholdRequest()
     
@@ -156,13 +384,73 @@ def convert_mv_to_mpn(mv_value: Optional[float]) -> Optional[float]:
     # Batasi nilai minimum ke 0 (tidak boleh negatif)
     return max(0.0, mpn_100ml)
 
-@app.post("/iot/data")
+@app.post(
+    "/iot/data",
+    tags=["IoT Data Management"],
+    summary="Terima Data dari Sensor IoT",
+    response_description="Konfirmasi penerimaan data dan total records"
+)
 def receive_iot_data(data: IoTDataInput):
     """
-    Endpoint untuk menerima data dari ESP32/Mappi32
+    ## IoT Data Ingestion Endpoint
     
-    ESP32 akan POST data sensor ke endpoint ini.
-    Data akan disimpan di memory dan bisa diambil via /iot/latest
+    Endpoint untuk menerima data real-time dari ESP32/Mappi32 sensor.
+    
+    **Hardware Integration**:
+    - ESP32 via LoRa/WiFi POST data sensor ke endpoint ini
+    - Data disimpan di in-memory deque (maxlen=1000)
+    - Konversi otomatis sensor mV → MPN/100mL
+    - Timestamp ditambahkan otomatis (WIB/UTC+7)
+    
+    **Input Data**:
+    - `temp_c`: Suhu air (°C)
+    - `do_mgl`: Dissolved Oxygen (mg/L)
+    - `ph`: pH level
+    - `conductivity_uscm`: Konduktivitas (µS/cm)
+    - `totalcoliform_mv` (opsional): Sensor Total Coliform dalam mV
+    
+    **Konversi Sensor**:
+    - Formula: `MPN/100mL = mV / 100`
+    - Contoh: 50 mV → 0.5 MPN/100mL
+    - Range: 0-1000 mV → 0-10 MPN/100mL
+    
+    **Response Example**:
+    ```json
+    {
+        "status": "success",
+        "message": "Data received from IoT device",
+        "data": {
+            "timestamp": "2025-11-07T14:30:00",
+            "temp_c": 27.8,
+            "do_mgl": 6.2,
+            "ph": 7.2,
+            "conductivity_uscm": 620,
+            "totalcoliform_mv": 50.0,
+            "totalcoliform_mpn_100ml": 0.5
+        },
+        "total_records": 42
+    }
+    ```
+    
+    **Storage**:
+    - In-memory (non-persistent)
+    - Max 1000 data points (FIFO queue)
+    - Data hilang saat restart server
+    
+    **ESP32 Example Code**:
+    ```cpp
+    HTTPClient http;
+    http.begin("http://api-url/iot/data");
+    http.addHeader("Content-Type", "application/json");
+    
+    String payload = "{\\"temp_c\\":27.8,\\"do_mgl\\":6.2,\\"ph\\":7.2,\\"conductivity_uscm\\":620,\\"totalcoliform_mv\\":50.0}";
+    int httpCode = http.POST(payload);
+    ```
+    
+    **Status Codes**:
+    - `200 OK`: Data berhasil disimpan
+    - `422 Validation Error`: Format data tidak valid
+    - `500 Internal Server Error`: Error penyimpanan data
     """
     try:
         # Konversi sensor mV ke MPN/100mL
@@ -190,13 +478,63 @@ def receive_iot_data(data: IoTDataInput):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/iot/latest")
+@app.get(
+    "/iot/latest",
+    tags=["IoT Data Management"],
+    summary="Dapatkan Data Sensor Terbaru",
+    response_description="Data sensor terbaru dengan status badges"
+)
 def get_latest_iot_data():
     """
-    Endpoint untuk mendapatkan data IoT terbaru dengan badge status
+    ## Latest IoT Data Endpoint
     
-    Frontend akan polling endpoint ini untuk mendapatkan data real-time
-    Badge akan menunjukkan status untuk setiap parameter termasuk Total Coliform sensor
+    Endpoint untuk mendapatkan data sensor IoT terbaru dengan status badges.
+    
+    **Use Case**:
+    - Frontend dashboard polling setiap 1 jam
+    - Real-time monitoring display
+    - Status badge untuk semua parameter
+    
+    **Response Structure**:
+    ```json
+    {
+        "status": "success",
+        "data": {
+            "timestamp": "2025-11-07T14:30:00",
+            "temp_c": 27.8,
+            "do_mgl": 6.2,
+            "ph": 7.2,
+            "conductivity_uscm": 620,
+            "totalcoliform_mv": 50.0,
+            "totalcoliform_mpn_100ml": 0.5
+        },
+        "badges": {
+            "temp_c": {"status": "safe", "color": "green", "label": "Normal"},
+            "do_mgl": {"status": "safe", "color": "green", "label": "Optimal"},
+            "ph": {"status": "safe", "color": "green", "label": "Netral"},
+            "conductivity_uscm": {"status": "safe", "color": "green", "label": "Normal"},
+            "totalcoliform_mpn_100ml": {"status": "safe", "color": "green", "label": "Aman"}
+        },
+        "total_records": 42
+    }
+    ```
+    
+    **Badge Status**:
+    - `safe` (green): Parameter dalam batas aman
+    - `warning` (yellow): Parameter di zona peringatan
+    - `danger` (red): Parameter berbahaya
+    
+    **No Data Response**:
+    ```json
+    {
+        "status": "no_data",
+        "message": "No IoT data available yet",
+        "data": null
+    }
+    ```
+    
+    **Status Codes**:
+    - `200 OK`: Data tersedia (atau no_data)
     """
     if len(iot_data_storage) == 0:
         return {
@@ -229,13 +567,80 @@ def get_latest_iot_data():
         "total_records": len(iot_data_storage)
     }
 
-@app.get("/iot/history")
+@app.get(
+    "/iot/history",
+    tags=["IoT Data Management"],
+    summary="Dapatkan History Data IoT",
+    response_description="Daftar data sensor historis"
+)
 def get_iot_history(limit: int = 50):
     """
-    Endpoint untuk mendapatkan history data IoT
+    ## IoT History Data Endpoint
     
-    Parameter:
-    - limit: jumlah data terbaru yang diambil (default 50)
+    Endpoint untuk mendapatkan data historis dari sensor IoT.
+    
+    **Use Case**:
+    - Tabel riwayat data di dashboard
+    - Analisis tren kualitas air
+    - Export data untuk laporan
+    
+    **Query Parameters**:
+    - `limit` (integer): Jumlah data terbaru (default: 50, max: 1000)
+    
+    **Response Example**:
+    ```json
+    {
+        "status": "success",
+        "data": [
+            {
+                "timestamp": "2025-11-07T14:30:00",
+                "temp_c": 27.8,
+                "do_mgl": 6.2,
+                "ph": 7.2,
+                "conductivity_uscm": 620,
+                "totalcoliform_mv": 50.0,
+                "totalcoliform_mpn_100ml": 0.5
+            },
+            {
+                "timestamp": "2025-11-07T13:30:00",
+                "temp_c": 28.1,
+                "do_mgl": 6.0,
+                "ph": 7.3,
+                "conductivity_uscm": 615,
+                "totalcoliform_mv": 45.0,
+                "totalcoliform_mpn_100ml": 0.45
+            }
+        ],
+        "count": 2,
+        "total_records": 42
+    }
+    ```
+    
+    **Data Structure**:
+    - Array data sensor diurutkan dari lama → baru
+    - Timestamp dalam format ISO 8601
+    - Total Coliform sudah terkonversi ke MPN/100mL
+    
+    **No Data Response**:
+    ```json
+    {
+        "status": "no_data",
+        "message": "No IoT data available yet",
+        "data": []
+    }
+    ```
+    
+    **Example Request**:
+    ```bash
+    # Ambil 10 data terbaru
+    curl "http://localhost:8000/iot/history?limit=10"
+    
+    # Ambil semua data (max 1000)
+    curl "http://localhost:8000/iot/history?limit=1000"
+    ```
+    
+    **Status Codes**:
+    - `200 OK`: Data tersedia (atau no_data jika kosong)
     """
     if len(iot_data_storage) == 0:
         return {
@@ -254,12 +659,112 @@ def get_iot_history(limit: int = 50):
         "total_records": len(iot_data_storage)
     }
 
-@app.post("/iot/predict")
+@app.post(
+    "/iot/predict",
+    tags=["IoT Data Management"],
+    summary="Auto-Predict dari Data IoT Terbaru (Tanpa Input)",
+    response_description="Hasil prediksi AI dari data sensor terbaru"
+)
 def predict_from_iot():
     """
-    Endpoint untuk auto-predict dari data IoT terbaru
+    ## Auto-Prediction from Latest IoT Data (No Input Required)
     
-    Akan otomatis mengambil data IoT terbaru dan melakukan prediksi
+    Endpoint untuk **OTOMATIS** melakukan prediksi AI dari data sensor IoT terbaru.
+    **TIDAK PERLU KIRIM PARAMETER** - data diambil otomatis dari storage!
+    
+    ---
+    
+    ### 🔀 **Perbedaan `/predict` vs `/iot/predict`:**
+    
+    | Aspek | `/predict` | `/iot/predict` (Endpoint ini) |
+    |-------|-----------|-------------------------------|
+    | **Input** | ✅ Manual (kirim parameter) | ❌ Auto (ambil dari sensor) |
+    | **Request Body** | ✅ Required | ❌ Empty (POST tanpa body!) |
+    | **Use Case** | Testing, simulasi, lab validation | Real-time monitoring, automation |
+    | **User** | Human (researcher, technician) | Machine (scheduler, automation) |
+    
+    ### ✅ **Kapan Pakai `/iot/predict` (Endpoint Ini):**
+    - 🤖 **Automation/Cron Job**: Prediksi periodik tanpa input manual
+    - 📊 **Real-time Dashboard**: Auto-refresh setiap X menit
+    - 🔔 **Alert System**: Trigger notifikasi berdasarkan prediksi
+    - 📡 **IoT Monitoring**: Setelah sensor kirim data via `/iot/data`
+    - ⚡ **Quick Prediction**: Cepat! 1 API call tanpa perlu fetch data dulu
+    
+    ### ❌ **Jangan Pakai `/iot/predict` Jika:**
+    - Belum ada data IoT di storage → Error 404 (gunakan `/predict` untuk manual input)
+    - Mau test parameter custom → Pakai `/predict` (bisa input apa saja)
+    - Data bukan dari sensor IoT → Pakai `/predict` (untuk lab test, simulasi, dll)
+    
+    ---
+    
+    ### 📋 **Workflow Typical**:
+    ```
+    Step 1: ESP32 kirim data sensor
+    POST /iot/data
+    {
+      "temp_c": 27.8,
+      "do_mgl": 6.2,
+      "ph": 7.2,
+      "conductivity_uscm": 620,
+      "totalcoliform_mv": 50
+    }
+    
+    Step 2: API simpan data ke storage ✅
+    
+    Step 3: Trigger auto-predict (TANPA PARAMETER!)
+    POST /iot/predict  ← Empty body!
+    
+    Step 4: Dapatkan hasil prediksi + metadata IoT ✅
+    ```
+    
+    ---
+    
+    **Flow Internal**:
+    1. Ambil data sensor terbaru dari `iot_data_storage`
+    2. Convert ke format `PredictRequest`
+    3. Jalankan AI prediction (sama seperti `/predict`)
+    4. Return hasil + metadata IoT tambahan
+    
+    **Response Example**:
+    ```json
+    {
+        "input_used": {...},
+        "prediction": {
+            "total_coliform_mpn_100ml": 0.45,
+            "ci90_low": 0.20,
+            "ci90_high": 0.85,
+            "disclaimer": "Estimasi AI berbasis 4 parameter fisiko-kimia (bukan hasil uji lab)."
+        },
+        "ai_detection": {
+            "potable": true,
+            "severity": "safe",
+            "reasons": [...],
+            "recommendations": [...],
+            "alternative_use": null,
+            "thresholds": {...}
+        },
+        "status_badges": {...},
+        "iot_timestamp": "2025-11-07T14:30:00",
+        "iot_source": "mappi32"
+    }
+    ```
+    
+    **Metadata Tambahan**:
+    - `iot_timestamp`: Waktu data sensor diterima
+    - `iot_source`: Sumber data (mappi32/esp32)
+    
+    **Error Cases**:
+    - **404 Not Found**: Belum ada data IoT tersimpan
+    
+    **Example Request**:
+    ```bash
+    curl -X POST "http://localhost:8000/iot/predict"
+    ```
+    
+    **Status Codes**:
+    - `200 OK`: Prediksi berhasil
+    - `404 Not Found`: Belum ada data IoT
+    - `500 Internal Server Error`: Error pada model AI
     """
     if len(iot_data_storage) == 0:
         raise HTTPException(status_code=404, detail="No IoT data available")
@@ -284,10 +789,50 @@ def predict_from_iot():
     
     return result
 
-@app.delete("/iot/clear")
+@app.delete(
+    "/iot/clear",
+    tags=["IoT Data Management"],
+    summary="Hapus Semua Data IoT",
+    response_description="Konfirmasi penghapusan data"
+)
 def clear_iot_data():
     """
-    Endpoint untuk clear semua data IoT (untuk testing)
+    ## Clear All IoT Data
+    
+    Endpoint untuk menghapus semua data IoT dari storage.
+    
+    **⚠️ PERINGATAN**: Endpoint ini akan menghapus SEMUA data historis!
+    
+    **Use Case**:
+    - Testing dan development
+    - Reset data setelah maintenance
+    - Clear data sebelum deployment baru
+    
+    **Behavior**:
+    - Menghapus semua data dari in-memory deque
+    - Tidak dapat di-undo (permanent deletion)
+    - Storage kembali ke state kosong
+    
+    **Response Example**:
+    ```json
+    {
+        "status": "success",
+        "message": "All IoT data cleared"
+    }
+    ```
+    
+    **Security Note**:
+    - Di production, endpoint ini harus dilindungi dengan authentication
+    - Pertimbangkan menambahkan confirmation token
+    - Log semua clear operations untuk audit trail
+    
+    **Example Request**:
+    ```bash
+    curl -X DELETE "http://localhost:8000/iot/clear"
+    ```
+    
+    **Status Codes**:
+    - `200 OK`: Data berhasil dihapus
     """
     iot_data_storage.clear()
     return {

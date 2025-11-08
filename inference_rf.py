@@ -143,7 +143,7 @@ def decide_potability(readings: Dict[str, float],
     if do is not None:
         if do < thresholds.do_low_mgl:
             # WASPADA: <5 mg/L
-            reasons.append(f"DO {do:.1f} mg/L - WASPADA (< {thresholds.do_low_mgl:.0f} mg/L), kurang layak untuk dikonsumsi")
+            reasons.append(f"DO {do:.1f} mg/L - BAHAYA (< {thresholds.do_low_mgl:.0f} mg/L), kurang layak untuk dikonsumsi")
         elif do < thresholds.do_optimal_mgl:
             # RENDAH: 5-6 mg/L
             reasons.append(f"DO {do:.1f} mg/L - Rendah (< {thresholds.do_optimal_mgl:.0f} mg/L), di bawah optimal")
@@ -252,7 +252,7 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
         badges["temp_c"] = ("optimal", f"Aman {temp:.1f}°C")
     elif thresholds.temp_warning_min_c <= temp <= thresholds.temp_warning_max_c:
         # WASPADA: 36-44°C (oranye) - zona E. coli
-        badges["temp_c"] = ("warning", f"⚠️ Zona E. coli {temp:.1f}°C")
+        badges["temp_c"] = ("warning", f"⚠️ Waspada         {card("Suhu", fmt.format(temp), "°C", bTemp)}{temp:.1f}°C")
     elif temp >= thresholds.temp_hot_safe_c:
         # WASPADA: ≥45°C (oranye) - panas, perlu dinginkan
         badges["temp_c"] = ("warning", f"⚠️ Terlalu panas {temp:.1f}°C")

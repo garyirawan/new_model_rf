@@ -100,12 +100,19 @@ const badgeStyle = (kind: string) => {
     case "optimal":
     case "good":
     case "normal":
-      return "bg-green-100 text-green-700";
+    case "safe":
+      // Hijau - Parameter aman
+      return "bg-green-500 text-white font-semibold";
     case "low":
     case "warning":
-      return "bg-amber-100 text-amber-700";
+      // Orange - Parameter perlu perhatian
+      return "bg-orange-500 text-white font-semibold";
     case "high":
-      return "bg-red-100 text-red-700";
+    case "danger":
+      // Merah - Parameter berbahaya
+      return "bg-red-500 text-white font-semibold";
+    case "unknown":
+      return "bg-gray-300 text-gray-700";
     default:
       return "bg-gray-100 text-gray-600";
   }
@@ -405,13 +412,14 @@ export default function WaterQualityDashboard() {
       <div className="text-gray-500 text-sm mb-1">{title}</div>
       <div className="text-2xl font-semibold">{value} <span className="text-base text-gray-500">{unit}</span></div>
       {badge && (
-        <span className={`inline-block mt-2 px-2 py-1 text-xs rounded-full ${badgeStyle(badge[0])}`}>
+        <span className={`inline-block mt-2 px-3 py-1.5 text-xs rounded-full ${badgeStyle(badge[0])}`}>
           {badge[1]}
         </span>
       )}
     </div>
   );
 
+  const bTemp = badges?.temp_c as [string, string] | undefined;
   const bPH = badges?.ph as [string, string] | undefined;
   const bDO = badges?.do_mgl as [string, string] | undefined;
   const bCond = badges?.conductivity_uscm as [string, string] | undefined;
@@ -534,7 +542,7 @@ export default function WaterQualityDashboard() {
         <div className="mb-6">
           <h2 className="text-lg font-semibold mb-3 text-gray-700">📊 Pembacaan Sensor Real-Time</h2>
           <div className="grid md:grid-cols-6 gap-4">
-            {card("Suhu", fmt.format(temp), "°C")}
+            {card("Suhu", fmt.format(temp), "°C", bTemp)}
             {card("Dissolved Oxygen (DO)", fmt.format(doMgl), "mg/L", bDO)}
             {card("pH", fmt.format(ph), "", bPH)}
             {card("Konduktivitas", fmt.format(cond), "µS/cm", bCond)}
