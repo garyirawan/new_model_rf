@@ -117,6 +117,7 @@ class IoTDataInput(BaseModel):
     - Conductivity: 50-1500 μS/cm
     - Total Coliform mV: 0-1000 mV (0-10 MPN/100mL setelah konversi)
     """
+    sensor_id: Optional[str] = Field(None, description="Unique sensor identifier (e.g., ECOLI_NODE_01)", example="ECOLI_NODE_01")
     temp_c: float = Field(..., description="Temperature in °C", example=27.8)
     do_mgl: float = Field(..., description="Dissolved Oxygen in mg/L", example=6.2)
     ph: float = Field(..., description="pH level", example=7.2)
@@ -402,6 +403,7 @@ def receive_iot_data(data: IoTDataInput):
     - Timestamp ditambahkan otomatis (WIB/UTC+7)
     
     **Input Data**:
+    - `sensor_id` (opsional): ID unik sensor (contoh: "ECOLI_NODE_01", default: "UNKNOWN")
     - `temp_c`: Suhu air (°C)
     - `do_mgl`: Dissolved Oxygen (mg/L)
     - `ph`: pH level
@@ -419,7 +421,8 @@ def receive_iot_data(data: IoTDataInput):
         "status": "success",
         "message": "Data received from IoT device",
         "data": {
-            "timestamp": "2025-11-07T14:30:00",
+            "timestamp": "2025-11-09T14:30:00",
+            "sensor_id": "ECOLI_NODE_01",
             "temp_c": 27.8,
             "do_mgl": 6.2,
             "ph": 7.2,
@@ -442,7 +445,7 @@ def receive_iot_data(data: IoTDataInput):
     http.begin("http://api-url/iot/data");
     http.addHeader("Content-Type", "application/json");
     
-    String payload = "{\\"temp_c\\":27.8,\\"do_mgl\\":6.2,\\"ph\\":7.2,\\"conductivity_uscm\\":620,\\"totalcoliform_mv\\":50.0}";
+    String payload = "{\\"sensor_id\\":\\"ECOLI_NODE_01\\",\\"temp_c\\":27.8,\\"do_mgl\\":6.2,\\"ph\\":7.2,\\"conductivity_uscm\\":620,\\"totalcoliform_mv\\":50.0}";
     int httpCode = http.POST(payload);
     ```
     
@@ -458,6 +461,7 @@ def receive_iot_data(data: IoTDataInput):
         # Simpan data dengan timestamp
         iot_record = {
             "timestamp": datetime.now().isoformat(),
+            "sensor_id": data.sensor_id or "UNKNOWN",  # Default jika tidak dikirim
             "temp_c": data.temp_c,
             "do_mgl": data.do_mgl,
             "ph": data.ph,

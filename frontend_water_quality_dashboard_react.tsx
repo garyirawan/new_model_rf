@@ -690,10 +690,12 @@ export default function WaterQualityDashboard() {
                   <tr className="border-b-2 border-gray-200">
                     <th className="text-left py-3 px-4 font-semibold text-gray-700">#</th>
                     <th className="text-left py-3 px-4 font-semibold text-gray-700">Timestamp (WIB)</th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Sensor ID</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Suhu<br/>(°C)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">DO<br/>(mg/L)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">pH</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Konduktivitas<br/>(µS/cm)</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700">Tegangan (Sensor)<br/>(mV)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Total Coliform (Sensor)<br/>(MPN/100mL)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Prediksi AI<br/>(MPN/100mL)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Status</th>
@@ -706,10 +708,16 @@ export default function WaterQualityDashboard() {
                       <td className="py-3 px-4 text-gray-700 font-mono text-xs">
                         {formatDateWIB(item.timestamp)}
                       </td>
+                      <td className="py-3 px-4 text-gray-600 font-mono text-xs">
+                        {item.sensor_id || 'UNKNOWN'}
+                      </td>
                       <td className="text-center py-3 px-4">{fmt.format(item.temp_c)}</td>
                       <td className="text-center py-3 px-4">{fmt.format(item.do_mgl)}</td>
                       <td className="text-center py-3 px-4">{fmt.format(item.ph)}</td>
                       <td className="text-center py-3 px-4">{fmt.format(item.conductivity_uscm)}</td>
+                      <td className="text-center py-3 px-4 text-purple-600 font-mono">
+                        {item.totalcoliform_mv !== null && item.totalcoliform_mv !== undefined ? fmt.format(item.totalcoliform_mv) : '-'}
+                      </td>
                       <td className="text-center py-3 px-4">{fmt.format(item.totalcoliform_mpn_100ml ?? 0)}</td>
                       <td className="text-center py-3 px-4 font-semibold">
                         {item.prediction !== null ? (
