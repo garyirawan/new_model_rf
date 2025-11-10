@@ -14,6 +14,16 @@ sys.path.append(HERE)
 
 from inference_rf import RFRegressorWrapper, decide_potability, Thresholds, status_badges
 
+# ========================================
+# SENSOR IDs CONFIGURATION (Hardcoded)
+# ========================================
+SENSOR_IDS = {
+    "ph_temp": "PH_TEMP_SLAVE_ID",      # pH & Temperature sensor (combined)
+    "do": "DO_SLAVE_ID",                 # Dissolved Oxygen sensor
+    "conductivity": "EC_SLAVE_ID",       # Electrical Conductivity sensor
+    "totalcoliform": "ECOLI_SLAVE_ID"    # E.Coli Fiber Optic sensor
+}
+
 # Lokasi model & urutan fitur (menggunakan model terbaru yang sudah improved)
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(HERE, "rf_total_coliform_log1p_improved.joblib"))
 FEATURES_ORDER_PATH = os.getenv("FEATURES_ORDER_PATH", os.path.join(HERE, "model_features_order.txt"))
@@ -108,6 +118,12 @@ class IoTDataInput(BaseModel):
     Data sensor dikirim via POST ke endpoint `/iot/data`.
     Total Coliform dalam bentuk mV akan otomatis dikonversi ke MPN/100mL.
     
+    **Sensor IDs (Hardcoded di Backend)**:
+    - PH_TEMP_SLAVE_ID: pH & Temperature sensor (combined)
+    - DO_SLAVE_ID: Dissolved Oxygen sensor
+    - EC_SLAVE_ID: Electrical Conductivity sensor
+    - ECOLI_SLAVE_ID: E.Coli Fiber Optic sensor
+    
     **Formula konversi**: MPN/100mL = mV / 100
     
     **Rentang Normal**:
@@ -117,7 +133,6 @@ class IoTDataInput(BaseModel):
     - Conductivity: 50-1500 μS/cm
     - Total Coliform mV: 0-1000 mV (0-10 MPN/100mL setelah konversi)
     """
-    sensor_id: Optional[str] = Field(None, description="Unique sensor identifier (e.g., ECOLI_NODE_01)", example="ECOLI_NODE_01")
     temp_c: float = Field(..., description="Temperature in °C", example=27.8)
     do_mgl: float = Field(..., description="Dissolved Oxygen in mg/L", example=6.2)
     ph: float = Field(..., description="pH level", example=7.2)
@@ -401,14 +416,20 @@ def receive_iot_data(data: IoTDataInput):
     - Data disimpan di in-memory deque (maxlen=1000)
     - Konversi otomatis sensor mV → MPN/100mL
     - Timestamp ditambahkan otomatis (WIB/UTC+7)
+    - **Sensor IDs didefinisikan di backend** (tidak perlu dikirim dari IoT device)
     
-    **Input Data**:
-    - `sensor_id` (opsional): ID unik sensor (contoh: "ECOLI_NODE_01", default: "UNKNOWN")
-    - `temp_c`: Suhu air (°C)
-    - `do_mgl`: Dissolved Oxygen (mg/L)
-    - `ph`: pH level
-    - `conductivity_uscm`: Konduktivitas (µS/cm)
-    - `totalcoliform_mv` (opsional): Sensor Total Coliform dalam mV
+    **Sensor Mapping (Hardcoded)**:
+    - `temp_c` & `ph` → **PH_TEMP_SLAVE_ID** (sensor gabungan)
+    - `do_mgl` → **DO_SLAVE_ID**
+    - `conductivity_uscm` → **EC_SLAVE_ID**
+    - `totalcoliform_mv` → **ECOLI_SLAVE_ID**
+    
+    **Input Data (Request Body)**:
+    - `temp_c`: Suhu air (°C) - **Required**
+    - `do_mgl`: Dissolved Oxygen (mg/L) - **Required**
+    - `ph`: pH level - **Required**
+    - `conductivity_uscm`: Konduktivitas (µS/cm) - **Required**
+    - `totalcoliform_mv`: Sensor Total Coliform dalam mV - **Optional**
     
     **Konversi Sensor**:
     - Formula: `MPN/100mL = mV / 100`
@@ -422,7 +443,12 @@ def receive_iot_data(data: IoTDataInput):
         "message": "Data received from IoT device",
         "data": {
             "timestamp": "2025-11-09T14:30:00",
-            "sensor_id": "ECOLI_NODE_01",
+            "sensor_ids": {
+                "ph_temp": "PH_TEMP_SLAVE_ID",
+                "do": "DO_SLAVE_ID",
+                "conductivity": "EC_SLAVE_ID",
+                "totalcoliform": "ECOLI_SLAVE_ID"
+            },
             "temp_c": 27.8,
             "do_mgl": 6.2,
             "ph": 7.2,
@@ -445,7 +471,8 @@ def receive_iot_data(data: IoTDataInput):
     http.begin("http://api-url/iot/data");
     http.addHeader("Content-Type", "application/json");
     
-    String payload = "{\\"sensor_id\\":\\"ECOLI_NODE_01\\",\\"temp_c\\":27.8,\\"do_mgl\\":6.2,\\"ph\\":7.2,\\"conductivity_uscm\\":620,\\"totalcoliform_mv\\":50.0}";
+    // Sensor IDs otomatis ditambahkan oleh backend, tidak perlu dikirim
+    String payload = "{\\"temp_c\\":27.8,\\"do_mgl\\":6.2,\\"ph\\":7.2,\\"conductivity_uscm\\":620,\\"totalcoliform_mv\\":50.0}";
     int httpCode = http.POST(payload);
     ```
     
@@ -458,10 +485,10 @@ def receive_iot_data(data: IoTDataInput):
         # Konversi sensor mV ke MPN/100mL
         totalcoliform_mpn = convert_mv_to_mpn(data.totalcoliform_mv)
         
-        # Simpan data dengan timestamp
+        # Simpan data dengan timestamp dan sensor IDs (dari config backend)
         iot_record = {
             "timestamp": datetime.now().isoformat(),
-            "sensor_id": data.sensor_id or "UNKNOWN",  # Default jika tidak dikirim
+            "sensor_ids": SENSOR_IDS,  # Tambahkan sensor IDs dari config backend
             "temp_c": data.temp_c,
             "do_mgl": data.do_mgl,
             "ph": data.ph,
@@ -504,6 +531,12 @@ def get_latest_iot_data():
         "status": "success",
         "data": {
             "timestamp": "2025-11-07T14:30:00",
+            "sensor_ids": {
+                "ph_temp": "PH_TEMP_SLAVE_ID",
+                "do": "DO_SLAVE_ID",
+                "conductivity": "EC_SLAVE_ID",
+                "totalcoliform": "ECOLI_SLAVE_ID"
+            },
             "temp_c": 27.8,
             "do_mgl": 6.2,
             "ph": 7.2,
@@ -517,6 +550,12 @@ def get_latest_iot_data():
             "ph": {"status": "safe", "color": "green", "label": "Netral"},
             "conductivity_uscm": {"status": "safe", "color": "green", "label": "Normal"},
             "totalcoliform_mpn_100ml": {"status": "safe", "color": "green", "label": "Aman"}
+        },
+        "sensor_ids": {
+            "ph_temp": "PH_TEMP_SLAVE_ID",
+            "do": "DO_SLAVE_ID",
+            "conductivity": "EC_SLAVE_ID",
+            "totalcoliform": "ECOLI_SLAVE_ID"
         },
         "total_records": 42
     }
@@ -567,6 +606,7 @@ def get_latest_iot_data():
         "status": "success",
         "data": latest,
         "badges": badges,
+        "sensor_ids": SENSOR_IDS,  # Include sensor IDs configuration
         "total_records": len(iot_data_storage)
     }
 
@@ -597,6 +637,12 @@ def get_iot_history(limit: int = 50):
         "data": [
             {
                 "timestamp": "2025-11-07T14:30:00",
+                "sensor_ids": {
+                    "ph_temp": "PH_TEMP_SLAVE_ID",
+                    "do": "DO_SLAVE_ID",
+                    "conductivity": "EC_SLAVE_ID",
+                    "totalcoliform": "ECOLI_SLAVE_ID"
+                },
                 "temp_c": 27.8,
                 "do_mgl": 6.2,
                 "ph": 7.2,
@@ -606,6 +652,12 @@ def get_iot_history(limit: int = 50):
             },
             {
                 "timestamp": "2025-11-07T13:30:00",
+                "sensor_ids": {
+                    "ph_temp": "PH_TEMP_SLAVE_ID",
+                    "do": "DO_SLAVE_ID",
+                    "conductivity": "EC_SLAVE_ID",
+                    "totalcoliform": "ECOLI_SLAVE_ID"
+                },
                 "temp_c": 28.1,
                 "do_mgl": 6.0,
                 "ph": 7.3,
@@ -614,6 +666,12 @@ def get_iot_history(limit: int = 50):
                 "totalcoliform_mpn_100ml": 0.45
             }
         ],
+        "sensor_ids": {
+            "ph_temp": "PH_TEMP_SLAVE_ID",
+            "do": "DO_SLAVE_ID",
+            "conductivity": "EC_SLAVE_ID",
+            "totalcoliform": "ECOLI_SLAVE_ID"
+        },
         "count": 2,
         "total_records": 42
     }
@@ -658,6 +716,7 @@ def get_iot_history(limit: int = 50):
     return {
         "status": "success",
         "data": history,
+        "sensor_ids": SENSOR_IDS,  # Include sensor IDs configuration
         "count": len(history),
         "total_records": len(iot_data_storage)
     }

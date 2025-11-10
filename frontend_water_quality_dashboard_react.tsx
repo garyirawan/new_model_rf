@@ -131,6 +131,9 @@ export default function WaterQualityDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ---- Sensor IDs state (from backend) ----
+  const [sensorIds, setSensorIds] = useState<any>(null);
+
   // ---- API response state ----
   const [prediction, setPrediction] = useState<
     | null
@@ -277,6 +280,30 @@ export default function WaterQualityDashboard() {
     }
   }
 
+  // Fungsi untuk fetch sensor IDs dari backend
+  async function fetchSensorIds() {
+    try {
+      const res = await fetch(`${API_BASE}/iot/latest`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const response = await res.json();
+      
+      // Extract sensor_ids dari response
+      if (response.sensor_ids) {
+        // Convert sensor_ids ke format parameters untuk tampilan
+        const parameters = {
+          temp_c: { sensor_id: response.sensor_ids.ph_temp },
+          ph: { sensor_id: response.sensor_ids.ph_temp },
+          do_mgl: { sensor_id: response.sensor_ids.do },
+          conductivity_uscm: { sensor_id: response.sensor_ids.conductivity },
+          totalcoliform_mv: { sensor_id: response.sensor_ids.totalcoliform }
+        };
+        setSensorIds(parameters);
+      }
+    } catch (e: any) {
+      console.error("Error fetching sensor IDs:", e);
+    }
+  }
+
   // Fungsi untuk fetch history data dari IoT
   async function fetchIoTHistory() {
     setHistoryLoading(true);
@@ -378,6 +405,7 @@ export default function WaterQualityDashboard() {
   // Auto-refresh setiap interval
   useEffect(() => {
     // Fetch pertama kali saat component mount
+    fetchSensorIds();    // Fetch sensor IDs dari backend
     refreshAllData();
     
     // Set interval untuk auto-refresh
@@ -645,6 +673,81 @@ export default function WaterQualityDashboard() {
           </div>
         </div>
 
+        {/* Sensor IDs Configuration Panel */}
+        {sensorIds && (
+          <div className="mt-6 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl shadow-sm p-6 border border-indigo-100">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">🔌 Sensor IDs Configuration</h2>
+                <p className="text-sm text-gray-600">Konfigurasi ID sensor yang didefinisikan di backend</p>
+              </div>
+            </div>
+            
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Temperature & pH */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-indigo-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">🌡️</span>
+                  <div className="text-xs font-semibold text-gray-500">Suhu & pH</div>
+                </div>
+                <div className="text-sm font-mono font-bold text-indigo-600 bg-indigo-50 px-3 py-2 rounded-lg">
+                  {sensorIds.temp_c?.sensor_id || "PH_TEMP_SLAVE_ID"}
+                </div>
+                <div className="text-xs text-gray-500 mt-2">
+                  Sensor gabungan untuk temperature dan pH level
+                </div>
+              </div>
+
+              {/* Dissolved Oxygen */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">💧</span>
+                  <div className="text-xs font-semibold text-gray-500">Dissolved Oxygen</div>
+                </div>
+                <div className="text-sm font-mono font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">
+                  {sensorIds.do_mgl?.sensor_id || "DO_SLAVE_ID"}
+                </div>
+                <div className="text-xs text-gray-500 mt-2">
+                  Kadar oksigen terlarut dalam air
+                </div>
+              </div>
+
+              {/* Conductivity */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-amber-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">⚡</span>
+                  <div className="text-xs font-semibold text-gray-500">Konduktivitas</div>
+                </div>
+                <div className="text-sm font-mono font-bold text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
+                  {sensorIds.conductivity_uscm?.sensor_id || "EC_SLAVE_ID"}
+                </div>
+                <div className="text-xs text-gray-500 mt-2">
+                  Electrical Conductivity (EC)
+                </div>
+              </div>
+
+              {/* E.Coli */}
+              <div className="bg-white rounded-xl p-4 shadow-sm border border-red-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">🦠</span>
+                  <div className="text-xs font-semibold text-gray-500">Total Coliform</div>
+                </div>
+                <div className="text-sm font-mono font-bold text-red-600 bg-red-50 px-3 py-2 rounded-lg">
+                  {sensorIds.totalcoliform_mv?.sensor_id || "ECOLI_SLAVE_ID"}
+                </div>
+                <div className="text-xs text-gray-500 mt-2">
+                  E.Coli Fiber Optic Sensor
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Tabel History Data IoT */}
         <div className="mt-6 rounded-2xl shadow-sm p-6 bg-white border border-gray-100">
           <div className="flex items-center justify-between mb-4">
@@ -690,13 +793,30 @@ export default function WaterQualityDashboard() {
                   <tr className="border-b-2 border-gray-200">
                     <th className="text-left py-3 px-4 font-semibold text-gray-700">#</th>
                     <th className="text-left py-3 px-4 font-semibold text-gray-700">Timestamp (WIB)</th>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-700">Sensor ID</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700">Suhu<br/>(°C)</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700">DO<br/>(mg/L)</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700">pH</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700">Konduktivitas<br/>(µS/cm)</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700">Tegangan (Sensor)<br/>(mV)</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700">Total Coliform (Sensor)<br/>(MPN/100mL)</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700">
+                      <div className="text-xs text-indigo-600 font-mono mb-1">{sensorIds?.temp_c?.sensor_id || 'PH_TEMP_SLAVE_ID'}</div>
+                      <div>Suhu (°C)</div>
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700">
+                      <div className="text-xs text-blue-600 font-mono mb-1">{sensorIds?.do_mgl?.sensor_id || 'DO_SLAVE_ID'}</div>
+                      <div>DO (mg/L)</div>
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700">
+                      <div className="text-xs text-indigo-600 font-mono mb-1">{sensorIds?.ph?.sensor_id || 'PH_TEMP_SLAVE_ID'}</div>
+                      <div>pH</div>
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700">
+                      <div className="text-xs text-amber-600 font-mono mb-1">{sensorIds?.conductivity_uscm?.sensor_id || 'EC_SLAVE_ID'}</div>
+                      <div>Konduktivitas (µS/cm)</div>
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700">
+                      <div className="text-xs text-red-600 font-mono mb-1">{sensorIds?.totalcoliform_mv?.sensor_id || 'ECOLI_SLAVE_ID'}</div>
+                      <div>Tegangan (mV)</div>
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700">
+                      <div className="text-xs text-red-600 font-mono mb-1">{sensorIds?.totalcoliform_mv?.sensor_id || 'ECOLI_SLAVE_ID'}</div>
+                      <div>Total Coliform (MPN/100mL)</div>
+                    </th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Prediksi AI<br/>(MPN/100mL)</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-700">Status</th>
                   </tr>
@@ -707,9 +827,6 @@ export default function WaterQualityDashboard() {
                       <td className="py-3 px-4 text-gray-600">{idx + 1}</td>
                       <td className="py-3 px-4 text-gray-700 font-mono text-xs">
                         {formatDateWIB(item.timestamp)}
-                      </td>
-                      <td className="py-3 px-4 text-gray-600 font-mono text-xs">
-                        {item.sensor_id || 'UNKNOWN'}
                       </td>
                       <td className="text-center py-3 px-4">{fmt.format(item.temp_c)}</td>
                       <td className="text-center py-3 px-4">{fmt.format(item.do_mgl)}</td>
