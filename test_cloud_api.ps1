@@ -1,1 +1,1 @@
-Invoke-RestMethod -Uri "https://water-quality-ai-ejw2.onrender.com/iot/data" -Method Post -Body '{"temp_c":27.8,"do_mgl":7,"ph":7,"conductivity_uscm":300,"totalcoliform_mv":0}' -ContentType "application/json"
+Invoke-RestMethod -Uri "https://gary29-water-quality-ai.hf.space/iot/data" -Method Post -Body '{"temp_c":27.8,"do_mgl":7.0,"ph":7,"conductivity_uscm":300,"totalcoliform_mv":0}' -ContentType "application/json"
