@@ -2,7 +2,7 @@
 import os
 import sys
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -23,6 +23,11 @@ SENSOR_IDS = {
     "conductivity": "EC_SLAVE_ID",       # Electrical Conductivity sensor
     "totalcoliform": "ECOLI_SLAVE_ID"    # E.Coli Fiber Optic sensor
 }
+
+# ========================================
+# TIMEZONE CONFIGURATION (WIB/UTC+7)
+# ========================================
+WIB = timezone(timedelta(hours=7))  # WIB = UTC+7
 
 # Lokasi model & urutan fitur (menggunakan model terbaru yang sudah improved)
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(HERE, "rf_total_coliform_log1p_improved.joblib"))
@@ -485,9 +490,9 @@ def receive_iot_data(data: IoTDataInput):
         # Konversi sensor mV ke MPN/100mL
         totalcoliform_mpn = convert_mv_to_mpn(data.totalcoliform_mv)
         
-        # Simpan data dengan timestamp dan sensor IDs (dari config backend)
+        # Simpan data dengan timestamp WIB dan sensor IDs (dari config backend)
         iot_record = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(WIB).isoformat(),  # Timestamp dengan WIB timezone
             "sensor_ids": SENSOR_IDS,  # Tambahkan sensor IDs dari config backend
             "temp_c": data.temp_c,
             "do_mgl": data.do_mgl,

@@ -48,7 +48,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ---- CONFIG ----
-const API_BASE = "http://localhost:8000"; // Lokal testing (ganti ke HF URL saat deploy)
+const API_BASE = "https://gary29-water-quality-ai.hf.space"; // Lokal testing (ganti ke HF URL saat deploy)
 const REFRESH_INTERVAL = 3600000; // Auto-refresh setiap 1 jam
 
 // Threshold - Sistem 3 Tingkatan (Updated Nov 6, 2025)
