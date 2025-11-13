@@ -1,12 +1,14 @@
 
 import os
 import sys
+import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from collections import deque
+import time
 
 # pastikan inference_rf.py bisa diimport (dalam folder yang sama)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +30,60 @@ SENSOR_IDS = {
 # TIMEZONE CONFIGURATION (WIB/UTC+7)
 # ========================================
 WIB = timezone(timedelta(hours=7))  # WIB = UTC+7
+
+# ========================================
+# LOGGING CONFIGURATION WITH WIB TIMEZONE
+# ========================================
+class WIBFormatter(logging.Formatter):
+    """Custom formatter dengan timezone WIB"""
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=WIB)
+        if datefmt:
+            return dt.strftime(datefmt)
+        else:
+            return dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+
+# Setup logging
+def setup_logger():
+    """Setup logger dengan file dan console handler"""
+    logger = logging.getLogger("water_quality_api")
+    logger.setLevel(logging.INFO)
+    
+    # Hindari duplicate handlers
+    if logger.handlers:
+        return logger
+    
+    # Format log dengan timestamp WIB
+    log_format = '%(asctime)s [%(levelname)s] %(name)s - %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
+    
+    # Console Handler (untuk development & Hugging Face logs)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_formatter = WIBFormatter(log_format, datefmt=date_format)
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
+    
+    # File Handler (untuk persistent logs di Hugging Face Spaces)
+    try:
+        log_dir = os.path.join(HERE, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, "water_quality_api.log")
+        
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        file_formatter = WIBFormatter(log_format, datefmt=date_format)
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
+        
+        logger.info(f"Log file created: {log_file}")
+    except Exception as e:
+        logger.warning(f"Could not create log file: {e}")
+    
+    return logger
+
+# Initialize logger
+logger = setup_logger()
 
 # Lokasi model & urutan fitur (menggunakan model terbaru yang sudah improved)
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(HERE, "rf_total_coliform_log1p_improved.joblib"))
@@ -107,12 +163,67 @@ app.add_middleware(
 # In-memory storage untuk data IoT (max 1000 data points)
 iot_data_storage = deque(maxlen=1000)
 
+# ========================================
+# MIDDLEWARE FOR REQUEST LOGGING
+# ========================================
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log setiap HTTP request dengan timestamp WIB"""
+    start_time = time.time()
+    
+    # Log incoming request
+    logger.info(f"→ {request.method} {request.url.path} | Client: {request.client.host if request.client else 'unknown'}")
+    
+    try:
+        response = await call_next(request)
+        process_time = (time.time() - start_time) * 1000  # Convert to ms
+        
+        # Log response
+        logger.info(f"← {request.method} {request.url.path} | Status: {response.status_code} | Time: {process_time:.2f}ms")
+        
+        return response
+    except Exception as e:
+        process_time = (time.time() - start_time) * 1000
+        logger.error(f"✗ {request.method} {request.url.path} | Error: {str(e)} | Time: {process_time:.2f}ms")
+        raise
+
+# ========================================
+# STARTUP & SHUTDOWN EVENTS
+# ========================================
 rfw = None
+
 @app.on_event("startup")
 def _load_model():
+    """Load ML model saat aplikasi startup"""
     global rfw
-    rfw = RFRegressorWrapper(MODEL_PATH, FEATURES_ORDER_PATH)
-    print(f"✓ Model loaded successfully from {MODEL_PATH}")
+    
+    logger.info("="*60)
+    logger.info("🚀 WATER QUALITY API STARTING UP")
+    logger.info("="*60)
+    logger.info(f"Model path: {MODEL_PATH}")
+    logger.info(f"Features order path: {FEATURES_ORDER_PATH}")
+    logger.info(f"Timezone: WIB (UTC+7)")
+    
+    try:
+        rfw = RFRegressorWrapper(MODEL_PATH, FEATURES_ORDER_PATH)
+        logger.info("✓ Model loaded successfully")
+        logger.info(f"✓ Model type: Random Forest Regressor")
+        logger.info(f"✓ Expected features: {rfw.expected_features if hasattr(rfw, 'expected_features') else 'N/A'}")
+    except Exception as e:
+        logger.error(f"✗ Failed to load model: {str(e)}")
+        raise
+    
+    logger.info("="*60)
+    logger.info("✓ API READY - Listening for requests")
+    logger.info("="*60)
+
+@app.on_event("shutdown")
+def _shutdown():
+    """Cleanup saat aplikasi shutdown"""
+    logger.info("="*60)
+    logger.info("🛑 WATER QUALITY API SHUTTING DOWN")
+    logger.info(f"Total data stored: {len(iot_data_storage)} records")
+    logger.info("="*60)
 
 # ====== DATA MODELS ======
 
@@ -231,6 +342,7 @@ def health():
     **Status Codes**:
     - `200 OK`: API berjalan normal
     """
+    logger.info("Health check request received")
     return {"status": "ok"}
 
 @app.post(
@@ -361,6 +473,9 @@ def predict(req: PredictRequest):
     # Badge Total Coliform ikut SENSOR (bukan prediksi AI)
     readings_for_badge = dict(readings)
     badges = status_badges(readings_for_badge, thresholds)
+    
+    # Log prediction
+    logger.info(f"AI Prediction: temp={req.temp_c}°C, DO={req.do_mgl}mg/L, pH={req.ph}, cond={req.conductivity_uscm}µS/cm → Coliform={infer.pred_total_coliform_mpn_100ml:.3f} MPN/100mL | Severity={decision.severity} | Potable={decision.potable}")
 
     # 4) Response
     return {
@@ -490,6 +605,9 @@ def receive_iot_data(data: IoTDataInput):
         # Konversi sensor mV ke MPN/100mL
         totalcoliform_mpn = convert_mv_to_mpn(data.totalcoliform_mv)
         
+        # Log incoming IoT data
+        logger.info(f"📡 IoT Data received: temp={data.temp_c}°C, DO={data.do_mgl}mg/L, pH={data.ph}, cond={data.conductivity_uscm}µS/cm, coliform_mv={data.totalcoliform_mv}mV → {totalcoliform_mpn:.3f if totalcoliform_mpn else 'N/A'} MPN/100mL")
+        
         # Simpan data dengan timestamp WIB dan sensor IDs (dari config backend)
         iot_record = {
             "timestamp": datetime.now(WIB).isoformat(),  # Timestamp dengan WIB timezone
@@ -504,6 +622,8 @@ def receive_iot_data(data: IoTDataInput):
         
         iot_data_storage.append(iot_record)
         
+        logger.info(f"✓ IoT data stored successfully. Total records: {len(iot_data_storage)}")
+        
         return {
             "status": "success",
             "message": "Data received from IoT device",
@@ -511,6 +631,7 @@ def receive_iot_data(data: IoTDataInput):
             "total_records": len(iot_data_storage)
         }
     except Exception as e:
+        logger.error(f"✗ Failed to store IoT data: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(
@@ -584,6 +705,7 @@ def get_latest_iot_data():
     - `200 OK`: Data tersedia (atau no_data)
     """
     if len(iot_data_storage) == 0:
+        logger.warning("No IoT data available - storage is empty")
         return {
             "status": "no_data",
             "message": "No IoT data available yet",
@@ -591,6 +713,8 @@ def get_latest_iot_data():
         }
     
     latest = iot_data_storage[-1]
+    
+    logger.info(f"Fetching latest IoT data: timestamp={latest.get('timestamp')}")
     
     # Generate badges untuk semua parameter termasuk coliform sensor
     # Gunakan default thresholds
@@ -708,7 +832,10 @@ def get_iot_history(limit: int = 50):
     **Status Codes**:
     - `200 OK`: Data tersedia (atau no_data jika kosong)
     """
+    logger.info(f"Fetching IoT history: limit={limit}, total_records={len(iot_data_storage)}")
+    
     if len(iot_data_storage) == 0:
+        logger.warning("No IoT history data available")
         return {
             "status": "no_data",
             "message": "No IoT data available yet",
@@ -717,6 +844,8 @@ def get_iot_history(limit: int = 50):
     
     # Ambil data terbaru sebanyak limit
     history = list(iot_data_storage)[-limit:]
+    
+    logger.info(f"✓ Returning {len(history)} history records")
     
     return {
         "status": "success",
@@ -901,8 +1030,15 @@ def clear_iot_data():
     **Status Codes**:
     - `200 OK`: Data berhasil dihapus
     """
+    record_count = len(iot_data_storage)
+    logger.warning(f"🗑️ CLEAR REQUEST: Deleting {record_count} IoT records from storage")
+    
     iot_data_storage.clear()
+    
+    logger.warning(f"✓ All IoT data cleared successfully. {record_count} records deleted.")
+    
     return {
         "status": "success",
-        "message": "All IoT data cleared"
+        "message": "All IoT data cleared",
+        "deleted_records": record_count
     }

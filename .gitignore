@@ -52,5 +52,9 @@ Thumbs.db
 # Vite
 .vite/
 
+# Logs
+logs/
+*.log
+
 # Hugging Face Space (separate repo)
 water-quality-ai/
