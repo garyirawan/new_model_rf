@@ -605,8 +605,11 @@ def receive_iot_data(data: IoTDataInput):
         # Konversi sensor mV ke MPN/100mL
         totalcoliform_mpn = convert_mv_to_mpn(data.totalcoliform_mv)
         
+        # Format coliform value untuk logging
+        coliform_display = f"{totalcoliform_mpn:.3f}" if totalcoliform_mpn is not None else "N/A"
+        
         # Log incoming IoT data
-        logger.info(f"📡 IoT Data received: temp={data.temp_c}°C, DO={data.do_mgl}mg/L, pH={data.ph}, cond={data.conductivity_uscm}µS/cm, coliform_mv={data.totalcoliform_mv}mV → {totalcoliform_mpn:.3f if totalcoliform_mpn else 'N/A'} MPN/100mL")
+        logger.info(f"📡 IoT Data received: temp={data.temp_c}°C, DO={data.do_mgl}mg/L, pH={data.ph}, cond={data.conductivity_uscm}µS/cm, coliform_mv={data.totalcoliform_mv}mV → {coliform_display} MPN/100mL")
         
         # Simpan data dengan timestamp WIB dan sensor IDs (dari config backend)
         iot_record = {
