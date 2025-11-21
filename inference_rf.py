@@ -95,18 +95,26 @@ def decide_potability(readings: Dict[str, float],
     recs = []
     alt = []
 
-    # PENTING: Prioritas keputusan potabilitas
-    # 1. Jika SENSOR Total Coliform ada nilai terukur (> 0) → PRIORITAS SENSOR
-    # 2. Jika sensor = 0 atau None → Pakai PREDIKSI AI
-    # Alasan: Jika sensor mendeteksi coliform aktual, itu data real-time yang harus diprioritaskan
+    # PENTING: Prioritas keputusan potabilitas (UPDATED: Nov 21, 2025)
+    # AMBIL NILAI MPN TERTINGGI antara SENSOR dan PREDIKSI AI
+    # Alasan: Untuk keamanan, gunakan nilai yang lebih tinggi (lebih konservatif/aman)
+    # - Jika sensor deteksi tinggi tapi AI prediksi rendah → pakai sensor (real measurement)
+    # - Jika AI prediksi tinggi tapi sensor rendah → pakai AI (bisa ada kontaminan yang tidak terdeteksi sensor)
     sensor_coliform = readings.get("totalcoliform_mv", None)
     
-    if sensor_coliform is not None and sensor_coliform > 0:
-        # SENSOR ADA NILAI TERUKUR → Pakai sensor (data real)
+    # Tentukan nilai untuk keputusan dengan max() dari sensor dan AI prediction
+    if sensor_coliform is not None and predicted_coliform_mpn_100ml is not None:
+        # KEDUA ADA → Ambil nilai tertinggi (lebih konservatif untuk safety)
+        col_for_decision = max(sensor_coliform, predicted_coliform_mpn_100ml)
+    elif sensor_coliform is not None:
+        # HANYA SENSOR → Pakai sensor
         col_for_decision = sensor_coliform
-    else:
-        # SENSOR 0 atau None → Pakai PREDIKSI AI (lebih reliable dari sensor mV)
+    elif predicted_coliform_mpn_100ml is not None:
+        # HANYA AI → Pakai prediksi AI
         col_for_decision = predicted_coliform_mpn_100ml
+    else:
+        # TIDAK ADA KEDUANYA → None
+        col_for_decision = None
 
     # --- Aturan potabilitas dengan sistem 3 tingkatan ---
     
