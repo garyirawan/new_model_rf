@@ -82,7 +82,7 @@ Content-Type: application/json
   "do_mgl": 6.2,
   "ph": 7.2,
   "conductivity_uscm": 620,
-  "totalcoliform_mpn_100ml": null  // optional
+  "totalcoliform_mv": null  // optional (MPN/100mL)
 }
 ```
 
@@ -90,7 +90,7 @@ Content-Type: application/json
 ```json
 {
   "prediction": {
-    "total_coliform_mpn_100ml": 12.5,
+    "total_coliform_mv": 12.5,
     "ci90_low": 8.2,
     "ci90_high": 16.8
   },

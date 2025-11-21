@@ -253,7 +253,7 @@ class IoTDataInput(BaseModel):
     do_mgl: float = Field(..., description="Dissolved Oxygen in mg/L", example=6.2)
     ph: float = Field(..., description="pH level", example=7.2)
     conductivity_uscm: float = Field(..., description="Conductivity in µS/cm", example=620)
-    totalcoliform_mv: Optional[float] = Field(None, description="Total Coliform sensor reading in mV (will be converted to MPN/100mL)", example=50.0)
+    totalcoliform_mv_raw: Optional[float] = Field(None, description="Total Coliform raw sensor reading in mV (raw voltage from sensor)", example=50.0)
 
 class PredictRequest(BaseModel):
     """
@@ -264,7 +264,7 @@ class PredictRequest(BaseModel):
     
     **Use Case**:
     - **Prediksi penuh**: Kirim 4 parameter → AI prediksi Total Coliform
-    - **Validasi sensor**: Kirim 4 parameter + totalcoliform_mpn_100ml → AI bandingkan dengan pengukuran aktual
+    - **Validasi sensor**: Kirim 4 parameter + totalcoliform_mv → AI bandingkan dengan pengukuran aktual
     
     **Parameter Wajib**:
     - Temperature, DO, pH, Conductivity
@@ -276,7 +276,7 @@ class PredictRequest(BaseModel):
     do_mgl: float = Field(..., description="Dissolved Oxygen in mg/L", example=6.2)
     ph: float = Field(..., description="pH level", example=7.2)
     conductivity_uscm: float = Field(..., description="Conductivity in µS/cm", example=620)
-    totalcoliform_mpn_100ml: Optional[float] = Field(None, description="Measured Total Coliform (MPN/100mL) - optional, akan diprediksi jika tidak ada", example=0.5)
+    totalcoliform_mv: Optional[float] = Field(None, description="Measured Total Coliform (MPN/100mL) - optional, akan diprediksi jika tidak ada", example=0.5)
 
 class ThresholdRequest(BaseModel):
     """
@@ -393,7 +393,6 @@ def predict(req: PredictRequest):
     - `do_mgl`: Dissolved Oxygen (mg/L) - Contoh: 6.2
     - `ph`: pH level - Contoh: 7.2
     - `conductivity_uscm`: Konduktivitas (µS/cm) - Contoh: 620
-    - `totalcoliform_mpn_100ml` (opsional): Nilai terukur Total Coliform
     
     **Response Structure**:
     ```json
@@ -404,24 +403,17 @@ def predict(req: PredictRequest):
             "ph": 7.2,
             "conductivity_uscm": 620
         },
-        "prediction": {
-            "total_coliform_mpn_100ml": 0.45,
-            "ci90_low": 0.20,
-            "ci90_high": 0.85,
-            "disclaimer": "Estimasi AI berbasis 4 parameter fisiko-kimia (bukan hasil uji lab)."
-        },
         "ai_detection": {
             "potable": true,
             "severity": "safe",
-            "reasons": ["Total Coliform rendah (0.45 MPN/100mL)"],
-            "recommendations": ["Air aman untuk diminum"],
+            "reasons": [],
+            "recommendations": [],
             "alternative_use": null,
             "thresholds": {...}
         },
         "status_badges": {
             "temp_c": {"status": "safe", "color": "green", "label": "Normal"},
-            "do_mgl": {"status": "safe", "color": "green", "label": "Optimal"},
-            ...
+            "do_mgl": {"status": "safe", "color": "green", "label": "Optimal"}
         }
     }
     ```
@@ -462,11 +454,11 @@ def predict(req: PredictRequest):
 
     # 2) Keputusan potabilitas (rules)
     readings = dict(features)
-    if req.totalcoliform_mpn_100ml is not None:
-        readings["totalcoliform_mpn_100ml"] = float(req.totalcoliform_mpn_100ml)
+    if req.totalcoliform_mv is not None:
+        readings["totalcoliform_mv"] = float(req.totalcoliform_mv)
 
     thresholds = Thresholds(**th.dict())
-    decision = decide_potability(readings, infer.pred_total_coliform_mpn_100ml, thresholds)
+    decision = decide_potability(readings, infer.pred_total_coliform_mv, thresholds)
 
     # 3) Badge status per parameter
     # Badge SEMUA parameter (termasuk Total Coliform) ikut nilai ASLI dari sensor/readings
@@ -475,13 +467,13 @@ def predict(req: PredictRequest):
     badges = status_badges(readings_for_badge, thresholds)
     
     # Log prediction
-    logger.info(f"AI Prediction: temp={req.temp_c}°C, DO={req.do_mgl}mg/L, pH={req.ph}, cond={req.conductivity_uscm}µS/cm → Coliform={infer.pred_total_coliform_mpn_100ml:.3f} MPN/100mL | Severity={decision.severity} | Potable={decision.potable}")
+    logger.info(f"AI Prediction: temp={req.temp_c}°C, DO={req.do_mgl}mg/L, pH={req.ph}, cond={req.conductivity_uscm}µS/cm → Coliform={infer.pred_total_coliform_mv:.3f} MPN/100mL | Severity={decision.severity} | Potable={decision.potable}")
 
     # 4) Response
     return {
         "input_used": infer.used_input,
         "prediction": {
-            "total_coliform_mpn_100ml": infer.pred_total_coliform_mpn_100ml,
+            "total_coliform_mv": infer.pred_total_coliform_mv,
             "ci90_low": infer.pred_ci90_low,
             "ci90_high": infer.pred_ci90_high,
             "disclaimer": "Estimasi AI berbasis 4 parameter fisiko-kimia (bukan hasil uji lab)."
@@ -534,7 +526,7 @@ def receive_iot_data(data: IoTDataInput):
     **Hardware Integration**:
     - ESP32 via LoRa/WiFi POST data sensor ke endpoint ini
     - Data disimpan di in-memory deque (maxlen=1000)
-    - Konversi otomatis sensor mV → MPN/100mL
+    - Konversi otomatis sensor mV_raw → MPN/100mL
     - Timestamp ditambahkan otomatis (WIB/UTC+7)
     - **Sensor IDs didefinisikan di backend** (tidak perlu dikirim dari IoT device)
     
@@ -542,17 +534,17 @@ def receive_iot_data(data: IoTDataInput):
     - `temp_c` & `ph` → **PH_TEMP_SLAVE_ID** (sensor gabungan)
     - `do_mgl` → **DO_SLAVE_ID**
     - `conductivity_uscm` → **EC_SLAVE_ID**
-    - `totalcoliform_mv` → **ECOLI_SLAVE_ID**
+    - `totalcoliform_mv_raw` → **ECOLI_SLAVE_ID**
     
     **Input Data (Request Body)**:
     - `temp_c`: Suhu air (°C) - **Required**
     - `do_mgl`: Dissolved Oxygen (mg/L) - **Required**
     - `ph`: pH level - **Required**
     - `conductivity_uscm`: Konduktivitas (µS/cm) - **Required**
-    - `totalcoliform_mv`: Sensor Total Coliform dalam mV - **Optional**
+    - `totalcoliform_mv_raw`: Sensor Total Coliform dalam mV - **Optional**
     
     **Konversi Sensor**:
-    - Formula: `MPN/100mL = mV / 100`
+    - Formula: `MPN/100mL = mV_raw / 100`
     - Contoh: 50 mV → 0.5 MPN/100mL
     - Range: 0-1000 mV → 0-10 MPN/100mL
     
@@ -573,8 +565,8 @@ def receive_iot_data(data: IoTDataInput):
             "do_mgl": 6.2,
             "ph": 7.2,
             "conductivity_uscm": 620,
-            "totalcoliform_mv": 50.0,
-            "totalcoliform_mpn_100ml": 0.5
+            "totalcoliform_mv_raw": 50.0,
+            "totalcoliform_mv": 0.5
         },
         "total_records": 42
     }
@@ -592,7 +584,7 @@ def receive_iot_data(data: IoTDataInput):
     http.addHeader("Content-Type", "application/json");
     
     // Sensor IDs otomatis ditambahkan oleh backend, tidak perlu dikirim
-    String payload = "{\\"temp_c\\":27.8,\\"do_mgl\\":6.2,\\"ph\\":7.2,\\"conductivity_uscm\\":620,\\"totalcoliform_mv\\":50.0}";
+    String payload = "{\\"temp_c\\":27.8,\\"do_mgl\\":6.2,\\"ph\\":7.2,\\"conductivity_uscm\\":620,\\"totalcoliform_mv_raw\\":50.0}";
     int httpCode = http.POST(payload);
     ```
     
@@ -602,15 +594,15 @@ def receive_iot_data(data: IoTDataInput):
     - `500 Internal Server Error`: Error penyimpanan data
     """
     try:
-        # Konversi sensor mV ke MPN/100mL
-        totalcoliform_mpn = convert_mv_to_mpn(data.totalcoliform_mv)
-        
+        # Konversi sensor mV ke MPN/100mL (input field is raw mV)
+        totalcoliform_mpn = convert_mv_to_mpn(data.totalcoliform_mv_raw)
+
         # Format coliform value untuk logging
         coliform_display = f"{totalcoliform_mpn:.3f}" if totalcoliform_mpn is not None else "N/A"
-        
+
         # Log incoming IoT data
-        logger.info(f"📡 IoT Data received: temp={data.temp_c}°C, DO={data.do_mgl}mg/L, pH={data.ph}, cond={data.conductivity_uscm}µS/cm, coliform_mv={data.totalcoliform_mv}mV → {coliform_display} MPN/100mL")
-        
+        logger.info(f"📡 IoT Data received: temp={data.temp_c}°C, DO={data.do_mgl}mg/L, pH={data.ph}, cond={data.conductivity_uscm}µS/cm, coliform_mv_raw={data.totalcoliform_mv_raw}mV → {coliform_display} MPN/100mL")
+
         # Simpan data dengan timestamp WIB dan sensor IDs (dari config backend)
         iot_record = {
             "timestamp": datetime.now(WIB).isoformat(),  # Timestamp dengan WIB timezone
@@ -619,14 +611,14 @@ def receive_iot_data(data: IoTDataInput):
             "do_mgl": data.do_mgl,
             "ph": data.ph,
             "conductivity_uscm": data.conductivity_uscm,
-            "totalcoliform_mv": data.totalcoliform_mv,
-            "totalcoliform_mpn_100ml": totalcoliform_mpn
+            "totalcoliform_mv_raw": data.totalcoliform_mv_raw,
+            "totalcoliform_mv": totalcoliform_mpn
         }
-        
+
         iot_data_storage.append(iot_record)
-        
+
         logger.info(f"✓ IoT data stored successfully. Total records: {len(iot_data_storage)}")
-        
+
         return {
             "status": "success",
             "message": "Data received from IoT device",
@@ -670,15 +662,15 @@ def get_latest_iot_data():
             "do_mgl": 6.2,
             "ph": 7.2,
             "conductivity_uscm": 620,
-            "totalcoliform_mv": 50.0,
-            "totalcoliform_mpn_100ml": 0.5
+            "totalcoliform_mv_raw": 50.0,
+            "totalcoliform_mv": 0.5
         },
         "badges": {
             "temp_c": {"status": "safe", "color": "green", "label": "Normal"},
             "do_mgl": {"status": "safe", "color": "green", "label": "Optimal"},
             "ph": {"status": "safe", "color": "green", "label": "Netral"},
             "conductivity_uscm": {"status": "safe", "color": "green", "label": "Normal"},
-            "totalcoliform_mpn_100ml": {"status": "safe", "color": "green", "label": "Aman"}
+            "totalcoliform_mv": {"status": "safe", "color": "green", "label": "Aman"}
         },
         "sensor_ids": {
             "ph_temp": "PH_TEMP_SLAVE_ID",
@@ -729,7 +721,7 @@ def get_latest_iot_data():
         "do_mgl": latest.get("do_mgl"),
         "ph": latest.get("ph"),
         "conductivity_uscm": latest.get("conductivity_uscm"),
-        "totalcoliform_mpn_100ml": latest.get("totalcoliform_mpn_100ml")  # Gunakan nilai terkonversi
+        "totalcoliform_mv": latest.get("totalcoliform_mv")  # Gunakan nilai terkonversi (MPN/100mL)
     }
     
     badges = status_badges(readings_for_badge, th)
@@ -779,8 +771,8 @@ def get_iot_history(limit: int = 50):
                 "do_mgl": 6.2,
                 "ph": 7.2,
                 "conductivity_uscm": 620,
-                "totalcoliform_mv": 50.0,
-                "totalcoliform_mpn_100ml": 0.5
+                "totalcoliform_mv_raw": 50.0,
+                "totalcoliform_mv": 0.5
             },
             {
                 "timestamp": "2025-11-07T13:30:00",
@@ -794,8 +786,8 @@ def get_iot_history(limit: int = 50):
                 "do_mgl": 6.0,
                 "ph": 7.3,
                 "conductivity_uscm": 615,
-                "totalcoliform_mv": 45.0,
-                "totalcoliform_mpn_100ml": 0.45
+                "totalcoliform_mv_raw": 45.0,
+                "totalcoliform_mv": 0.45
             }
         ],
         "sensor_ids": {
@@ -905,7 +897,6 @@ def predict_from_iot():
       "do_mgl": 6.2,
       "ph": 7.2,
       "conductivity_uscm": 620,
-      "totalcoliform_mv": 50
     }
     
     Step 2: API simpan data ke storage ✅
@@ -976,7 +967,7 @@ def predict_from_iot():
         do_mgl=latest["do_mgl"],
         ph=latest["ph"],
         conductivity_uscm=latest["conductivity_uscm"],
-        totalcoliform_mpn_100ml=None
+        totalcoliform_mv=None
     )
     
     # Gunakan endpoint predict yang sudah ada

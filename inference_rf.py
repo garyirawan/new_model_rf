@@ -37,7 +37,7 @@ class Thresholds:
 @dataclass
 class InferenceOutput:
     used_input: Dict[str, float]
-    pred_total_coliform_mpn_100ml: float
+    pred_total_coliform_mv: float
     pred_ci90_low: float
     pred_ci90_high: float
 
@@ -84,7 +84,7 @@ class RFRegressorWrapper:
         low = float(np.expm1(low_log))
         high = float(np.expm1(high_log))
         return InferenceOutput(used_input={k: float(features[k]) for k in self.features_order},
-                               pred_total_coliform_mpn_100ml=y,
+                               pred_total_coliform_mv=y,
                                pred_ci90_low=low,
                                pred_ci90_high=high)
 
@@ -99,7 +99,7 @@ def decide_potability(readings: Dict[str, float],
     # 1. Jika SENSOR Total Coliform ada nilai terukur (> 0) → PRIORITAS SENSOR
     # 2. Jika sensor = 0 atau None → Pakai PREDIKSI AI
     # Alasan: Jika sensor mendeteksi coliform aktual, itu data real-time yang harus diprioritaskan
-    sensor_coliform = readings.get("totalcoliform_mpn_100ml", None)
+    sensor_coliform = readings.get("totalcoliform_mv", None)
     
     if sensor_coliform is not None and sensor_coliform > 0:
         # SENSOR ADA NILAI TERUKUR → Pakai sensor (data real)
@@ -330,17 +330,17 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
     # === TOTAL COLIFORM (3 Tingkat) ===
     # Aman ≤0.70 | Waspada 0.71-0.99 | Bahaya ≥1.0
     # Note: Ambil dari readings jika ada, atau None
-    coliform = readings.get("totalcoliform_mpn_100ml", None)
+    coliform = readings.get("totalcoliform_mv", None)
     if coliform is None:
-        badges["totalcoliform_mpn_100ml"] = ("unknown", "–")
+        badges["totalcoliform_mv"] = ("unknown", "–")
     elif coliform <= thresholds.total_coliform_safe_mpn_100ml:
         # AMAN: ≤0.70 MPN/100mL (hijau)
-        badges["totalcoliform_mpn_100ml"] = ("optimal", f"Aman {coliform:.2f} MPN/100mL")
+        badges["totalcoliform_mv"] = ("optimal", f"Aman {coliform:.2f} MPN/100mL")
     elif coliform < thresholds.total_coliform_danger_mpn_100ml:
         # WASPADA: 0.71-0.99 MPN/100mL (kuning/oranye)
-        badges["totalcoliform_mpn_100ml"] = ("warning", f"⚠️ Waspada {coliform:.2f} MPN/100mL")
+        badges["totalcoliform_mv"] = ("warning", f"⚠️ Waspada {coliform:.2f} MPN/100mL")
     else:
         # BAHAYA: ≥1.0 MPN/100mL (merah)
-        badges["totalcoliform_mpn_100ml"] = ("danger", f"🔴 Bahaya {coliform:.2f} MPN/100mL")
+        badges["totalcoliform_mv"] = ("danger", f"🔴 Bahaya {coliform:.2f} MPN/100mL")
 
     return badges

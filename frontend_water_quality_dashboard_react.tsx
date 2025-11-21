@@ -48,7 +48,7 @@ if (typeof document !== 'undefined') {
 }
 
 // ---- CONFIG ----
-const API_BASE = "https://gary29-water-quality-ai.hf.space"; // Lokal testing (ganti ke HF URL saat deploy)
+const API_BASE = "http://localhost:8000";
 const REFRESH_INTERVAL = 3600000; // Auto-refresh setiap 1 jam
 
 // Threshold - Sistem 3 Tingkatan (Updated Nov 6, 2025)
@@ -125,7 +125,7 @@ export default function WaterQualityDashboard() {
   const [ph, setPh] = useState<number>(0);
   const [cond, setCond] = useState<number>(0);
   const [coliform, setColiform] = useState<number>(0);
-  const [coliformMpn, setColiformMpn] = useState<number>(0); // Nilai terkonversi ke MPN/100mL
+  const [coliformMv, setColiformMv] = useState<number>(0); // Nilai terkonversi ke MPN/100mL (totalcoliform_mv)
   const [lastUpdate, setLastUpdate] = useState<string>("");
 
   const [loading, setLoading] = useState(false);
@@ -138,7 +138,7 @@ export default function WaterQualityDashboard() {
   const [prediction, setPrediction] = useState<
     | null
     | {
-        total_coliform_mpn_100ml: number;
+        total_coliform_mv: number;
         ci90_low: number;
         ci90_high: number;
       }
@@ -195,8 +195,8 @@ export default function WaterQualityDashboard() {
       setDoMgl(iotData.do_mgl ?? 0);
       setPh(iotData.ph ?? 0);
       setCond(iotData.conductivity_uscm ?? 0);
-      setColiform(iotData.totalcoliform_mv ?? 0);
-      setColiformMpn(iotData.totalcoliform_mpn_100ml ?? 0); // Nilai terkonversi
+      setColiform(iotData.totalcoliform_mv_raw ?? 0);
+      setColiformMv(iotData.totalcoliform_mv ?? 0); // Nilai terkonversi
       setLastUpdate(iotData.timestamp ? formatDateWIB(iotData.timestamp) : "");
       
       // Update badges jika ada (untuk coliform sensor)
@@ -223,7 +223,7 @@ export default function WaterQualityDashboard() {
         ph: iotData ? (iotData.ph ?? 0) : Number(ph),
         conductivity_uscm: iotData ? (iotData.conductivity_uscm ?? 0) : Number(cond),
         // Sertakan nilai coliform sensor (MPN/100mL) jika ada dari IoT
-        totalcoliform_mpn_100ml: iotData ? (iotData.totalcoliform_mpn_100ml ?? null) : null,
+        totalcoliform_mv: iotData ? (iotData.totalcoliform_mv ?? null) : null,
       };
 
       const res = await fetch(`${API_BASE}/predict`, {
@@ -240,7 +240,7 @@ export default function WaterQualityDashboard() {
       }
 
       setPrediction({
-        total_coliform_mpn_100ml: data.prediction.total_coliform_mpn_100ml ?? 0,
+        total_coliform_mv: data.prediction.total_coliform_mv ?? 0,
         ci90_low: data.prediction.ci90_low ?? 0,
         ci90_high: data.prediction.ci90_high ?? 0,
       });
@@ -248,7 +248,7 @@ export default function WaterQualityDashboard() {
       // Merge badges: gabungkan badge dari predict dengan badge yang sudah ada (dari IoT)
       // Badge dari predict akan menimpa badge lama kecuali badge baru tidak ada
       setBadges((prevBadges: any) => ({
-        ...prevBadges,  // Keep existing badges (termasuk totalcoliform_mpn_100ml dari IoT)
+        ...prevBadges,  // Keep existing badges (termasuk totalcoliform_mv dari IoT)
         ...(data.status_badges ?? {}),  // Add/overwrite with new badges from predict
       }));
       
@@ -269,7 +269,7 @@ export default function WaterQualityDashboard() {
         ...h.slice(-49), // keep last 49 points (max 50)
         {
           t: t.toLocaleTimeString([], { hour12: false }),
-          pred: data.prediction.total_coliform_mpn_100ml ?? 0,
+          pred: data.prediction.total_coliform_mv ?? 0,
           low: data.prediction.ci90_low ?? 0,
           high: data.prediction.ci90_high ?? 0,
         },
@@ -321,7 +321,7 @@ export default function WaterQualityDashboard() {
               do_mgl: item.do_mgl,
               ph: item.ph,
               conductivity_uscm: item.conductivity_uscm,
-              totalcoliform_mpn_100ml: item.totalcoliform_mpn_100ml,  // KIRIM sensor ke backend untuk priority logic
+              totalcoliform_mv: item.totalcoliform_mv,  // KIRIM sensor ke backend untuk priority logic
             };
             const predictRes = await fetch(`${API_BASE}/predict`, {
               method: "POST",
@@ -332,7 +332,7 @@ export default function WaterQualityDashboard() {
             
             return {
               ...item,
-              prediction: predictData.prediction.total_coliform_mpn_100ml,
+              prediction: predictData.prediction.total_coliform_mv,
               potable: predictData.ai_detection.potable,
               severity: predictData.ai_detection.severity,  // TAMBAHKAN severity (safe/warning/danger)
             };
@@ -454,7 +454,7 @@ export default function WaterQualityDashboard() {
   const bPH = badges?.ph as [string, string] | undefined;
   const bDO = badges?.do_mgl as [string, string] | undefined;
   const bCond = badges?.conductivity_uscm as [string, string] | undefined;
-  const bColiform = badges?.totalcoliform_mpn_100ml as [string, string] | undefined;
+  const bColiform = badges?.totalcoliform_mv as [string, string] | undefined;
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
@@ -550,7 +550,7 @@ export default function WaterQualityDashboard() {
                   </p>
                   {prediction && (
                     <p className="text-sm mt-2 text-gray-600">
-                      Prediksi Total Coliform: <span className="font-semibold">{fmt.format(prediction.total_coliform_mpn_100ml)} MPN/100mL</span>
+                      Prediksi Total Coliform: <span className="font-semibold">{fmt.format(prediction.total_coliform_mv)} MPN/100mL</span>
                       {" "}(Aman: ≤0.70, Waspada: 0.71-0.99, Bahaya: ≥1.0)
                     </p>
                   )}
@@ -577,7 +577,7 @@ export default function WaterQualityDashboard() {
             {card("Dissolved Oxygen (DO)", fmt.format(doMgl), "mg/L", bDO)}
             {card("pH", fmt.format(ph), "", bPH)}
             {card("Konduktivitas", fmt.format(cond), "µS/cm", bCond)}
-            {card("Total Coliform (Sensor)", fmt.format(coliformMpn), "MPN/100mL", bColiform)}
+            {card("Total Coliform (Sensor)", fmt.format(coliformMv), "MPN/100mL", bColiform)}
             <div className="rounded-2xl shadow-sm p-4 bg-white border border-gray-100">
               <div className="text-gray-500 text-sm mb-2">Status Kelayakan</div>
               <div className="h-24">
@@ -835,7 +835,7 @@ export default function WaterQualityDashboard() {
                       <td className="text-center py-3 px-4 text-purple-600 font-mono">
                         {item.totalcoliform_mv !== null && item.totalcoliform_mv !== undefined ? fmt.format(item.totalcoliform_mv) : '-'}
                       </td>
-                      <td className="text-center py-3 px-4">{fmt.format(item.totalcoliform_mpn_100ml ?? 0)}</td>
+                      <td className="text-center py-3 px-4">{fmt.format(item.totalcoliform_mv ?? 0)}</td>
                       <td className="text-center py-3 px-4 font-semibold">
                         {item.prediction !== null ? (
                           <span className={`${item.prediction > 0 ? 'text-red-600' : 'text-green-600'}`}>
