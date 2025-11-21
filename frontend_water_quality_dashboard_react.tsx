@@ -48,7 +48,10 @@ if (typeof document !== 'undefined') {
 }
 
 // ---- CONFIG ----
-const API_BASE = "http://localhost:8000";
+// Gunakan localhost untuk development, production URL untuk deployment
+const API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:8000"  // Development
+  : "https://gary29-water-quality-ai.hf.space";  // Production
 const REFRESH_INTERVAL = 3600000; // Auto-refresh setiap 1 jam
 
 // Threshold - Sistem 3 Tingkatan (Updated Nov 6, 2025)
@@ -169,43 +172,67 @@ export default function WaterQualityDashboard() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
-  // Fungsi untuk fetch data terbaru dari IoT
+  // Fungsi untuk fetch data terbaru dari IoT dengan endpoint GET baru
   async function fetchLatestIoTData() {
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/iot/latest`);
+      // Gunakan endpoint GET /api/latest yang sudah include prediction
+      const res = await fetch(`${API_BASE}/api/latest`);
       if (!res.ok) {
         if (res.status === 404) {
           throw new Error("Belum ada data IoT. Pastikan ESP32 sudah mengirim data.");
         }
         throw new Error(`HTTP ${res.status}`);
       }
-      const response = await res.json();
-      const iotData = response.data; // Extract data dari response wrapper
-      const iotBadges = response.badges; // Extract badges dari response
+      const data = await res.json();
       
-      // Validasi null/undefined
-      if (!iotData || typeof iotData !== 'object') {
+      // Validasi response
+      if (!data || !data.sensor_data || !data.prediction || !data.status) {
         throw new Error("Data IoT tidak valid atau kosong.");
       }
       
-      // Update sensor readings dengan null safety
-      setTemp(iotData.temp_c ?? 0);
-      setDoMgl(iotData.do_mgl ?? 0);
-      setPh(iotData.ph ?? 0);
-      setCond(iotData.conductivity_uscm ?? 0);
-      setColiform(iotData.totalcoliform_mv_raw ?? 0);
-      setColiformMv(iotData.totalcoliform_mv ?? 0); // Nilai terkonversi
-      setLastUpdate(iotData.timestamp ? formatDateWIB(iotData.timestamp) : "");
+      // Update sensor readings dari sensor_data
+      setTemp(data.sensor_data.temp_c ?? 0);
+      setDoMgl(data.sensor_data.do_mgl ?? 0);
+      setPh(data.sensor_data.ph ?? 0);
+      setCond(data.sensor_data.conductivity_uscm ?? 0);
+      setColiform(data.sensor_data.totalcoliform_mv_raw ?? 0);
+      setColiformMv(data.sensor_data.totalcoliform_mv ?? 0);
+      setLastUpdate(data.timestamp ? formatDateWIB(data.timestamp) : "");
       
-      // Update badges jika ada (untuk coliform sensor)
-      if (iotBadges) {
-        setBadges(iotBadges);
+      // Update prediction dari response
+      setPrediction({
+        total_coliform_mv: data.prediction.total_coliform_mv ?? 0,
+        ci90_low: data.prediction.confidence_interval.low ?? 0,
+        ci90_high: data.prediction.confidence_interval.high ?? 0,
+      });
+      
+      // Update badges dari response
+      if (data.badges) {
+        setBadges(data.badges);
       }
       
-      // Auto-predict dengan data IoT terbaru
-      await handlePredict(iotData);
+      // Update decision dari status
+      setDecision({
+        potable: data.status.potable ?? false,
+        severity: data.status.severity ?? "safe",
+        reasons: data.status.reasons ?? [],
+        recommendations: data.status.recommendations ?? [],
+        alternative_use: [], // endpoint baru tidak include alternative_use
+      });
+      
+      // Update history chart
+      const t = new Date();
+      setHistory((h) => [
+        ...h.slice(-49),
+        {
+          t: t.toLocaleTimeString([], { hour12: false }),
+          pred: data.prediction.total_coliform_mv ?? 0,
+          low: data.prediction.confidence_interval.low ?? 0,
+          high: data.prediction.confidence_interval.high ?? 0,
+        },
+      ]);
       
     } catch (e: any) {
       setError(e.message || String(e));

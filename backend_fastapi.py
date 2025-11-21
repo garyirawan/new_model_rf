@@ -1036,3 +1036,256 @@ def clear_iot_data():
         "message": "All IoT data cleared",
         "deleted_records": record_count
     }
+
+# ====== PUBLIC API ENDPOINTS (GET) ======
+
+@app.get(
+    "/api/latest",
+    tags=["Public API"],
+    summary="Get Latest Water Quality Status (Simple GET)",
+    response_description="Status kualitas air terbaru (sensor + AI prediction)"
+)
+def get_latest_status():
+    """
+    ## 🌐 Public API: Latest Water Quality Status
+    
+    **ENDPOINT PALING MUDAH** untuk website eksternal yang ingin menampilkan status kualitas air.
+    
+    ---
+    
+    ### ✅ **Kenapa Endpoint Ini Best Choice?**
+    
+    - 🚀 **Super Simple**: GET request tanpa parameter apapun
+    - 📊 **Complete Data**: Sensor readings + AI prediction + Status badges
+    - 🔄 **Always Fresh**: Data dari sensor IoT terbaru
+    - 🎯 **Ready to Display**: Response sudah siap untuk ditampilkan langsung
+    - 🌍 **CORS Enabled**: Bisa dipanggil dari domain manapun
+    - 📱 **Mobile Friendly**: Lightweight response, cocok untuk mobile app
+    
+    ---
+    
+    ### 🎯 **Use Cases:**
+    
+    1. **Website/Blog Embed**
+       - Tampilkan widget status kualitas air real-time
+       - Refresh otomatis setiap X menit
+    
+    2. **Mobile App Integration**
+       - Fetch data untuk ditampilkan di dashboard app
+       - Tidak perlu handle POST request yang kompleks
+    
+    3. **IoT Display/Kiosk**
+       - Layar monitor yang menampilkan status air
+       - Polling periodik untuk update data
+    
+    4. **Third-Party Integration**
+       - Website pemerintah/kampus yang butuh data kualitas air
+       - News portal untuk laporan kualitas air
+    
+    ---
+    
+    ### 📊 **Response Structure:**
+    
+    ```json
+    {
+      "timestamp": "2025-11-21T14:30:00+07:00",
+      "sensor_data": {
+        "temp_c": 27.8,
+        "do_mgl": 6.2,
+        "ph": 7.2,
+        "conductivity_uscm": 620,
+        "totalcoliform_mv": 0.500
+      },
+      "prediction": {
+        "total_coliform_mv": 0.450,
+        "confidence_interval": {
+          "low": 0.350,
+          "high": 0.550
+        }
+      },
+      "status": {
+        "potable": true,
+        "severity": "safe",
+        "label": "LAYAK MINUM",
+        "color": "green",
+        "icon": "✅"
+      },
+      "badges": {
+        "temp_c": {"status": "safe", "label": "Normal", "color": "green"},
+        "do_mgl": {"status": "safe", "label": "Optimal", "color": "green"},
+        "ph": {"status": "safe", "label": "Netral", "color": "green"},
+        "conductivity_uscm": {"status": "safe", "label": "Normal", "color": "green"},
+        "totalcoliform_mv": {"status": "safe", "label": "Aman", "color": "green"}
+      }
+    }
+    ```
+    
+    ---
+    
+    ### 💡 **Quick Start Examples:**
+    
+    **JavaScript (Vanilla):**
+    ```javascript
+    fetch('https://gary29-water-quality-ai.hf.space/api/latest')
+      .then(res => res.json())
+      .then(data => {
+        console.log('Status:', data.status.label);
+        console.log('Severity:', data.status.severity);
+      });
+    ```
+    
+    **HTML (Direct Access):**
+    ```html
+    <script>
+      async function checkWaterQuality() {
+        const response = await fetch('YOUR_API_URL/api/latest');
+        const data = await response.json();
+        
+        document.getElementById('status').innerHTML = 
+          `<h2>${data.status.icon} ${data.status.label}</h2>
+           <p>Suhu: ${data.sensor_data.temp_c}°C</p>
+           <p>DO: ${data.sensor_data.do_mgl} mg/L</p>
+           <p>pH: ${data.sensor_data.ph}</p>`;
+      }
+    </script>
+    ```
+    
+    **PHP:**
+    ```php
+    $data = json_decode(file_get_contents('YOUR_API_URL/api/latest'), true);
+    echo "Status: " . $data['status']['label'];
+    ```
+    
+    **Python:**
+    ```python
+    import requests
+    data = requests.get('YOUR_API_URL/api/latest').json()
+    print(f"Status: {data['status']['label']}")
+    ```
+    
+    ---
+    
+    ### ⚠️ **Error Responses:**
+    
+    **404 - No Data Available:**
+    ```json
+    {
+      "detail": "Belum ada data IoT. Tunggu ESP32 mengirim data pertama."
+    }
+    ```
+    
+    **500 - Server Error:**
+    ```json
+    {
+      "detail": "Error message details"
+    }
+    ```
+    
+    ---
+    
+    ### 📝 **Notes:**
+    
+    - Data diambil dari sensor IoT terbaru yang tersimpan
+    - AI prediction menggunakan Random Forest model
+    - Status severity: `safe` (hijau) / `warning` (kuning) / `danger` (merah)
+    - Badge status untuk setiap parameter air
+    - Timestamp dalam zona waktu WIB (UTC+7)
+    
+    ---
+    
+    **Status Codes:**
+    - `200 OK`: Data berhasil diambil
+    - `404 Not Found`: Belum ada data IoT
+    - `500 Internal Server Error`: Error pada server
+    """
+    
+    # Check if IoT data available
+    if len(iot_data_storage) == 0:
+        logger.warning("GET /api/latest - No IoT data available")
+        raise HTTPException(
+            status_code=404,
+            detail="Belum ada data IoT. Tunggu ESP32 mengirim data pertama."
+        )
+    
+    try:
+        # Get latest IoT data
+        latest = iot_data_storage[-1]
+        
+        logger.info(f"GET /api/latest - Fetching data from timestamp: {latest.get('timestamp')}")
+        
+        # Build predict request
+        req = PredictRequest(
+            temp_c=latest.get("temp_c", 0),
+            do_mgl=latest.get("do_mgl", 0),
+            ph=latest.get("ph", 0),
+            conductivity_uscm=latest.get("conductivity_uscm", 0),
+            totalcoliform_mv=latest.get("totalcoliform_mv", None)
+        )
+        
+        # Use default thresholds
+        th = Thresholds()
+        
+        # 1) Prediksi mikroba dari 4 fitur
+        features = {
+            "temp_c": float(req.temp_c),
+            "do_mgl": float(req.do_mgl),
+            "ph": float(req.ph),
+            "conductivity_uscm": float(req.conductivity_uscm),
+        }
+        infer = rfw.predict_with_interval(features)
+
+        # 2) Keputusan potabilitas
+        readings = dict(features)
+        if req.totalcoliform_mv is not None:
+            readings["totalcoliform_mv"] = float(req.totalcoliform_mv)
+
+        decision = decide_potability(readings, infer.pred_total_coliform_mv, th)
+
+        # 3) Badge status per parameter
+        readings_for_badge = dict(readings)
+        badges = status_badges(readings_for_badge, th)
+        
+        # 4) Determine color and icon based on severity
+        severity_map = {
+            "safe": {"color": "green", "icon": "✅", "label": "LAYAK MINUM"},
+            "warning": {"color": "yellow", "icon": "⚠️", "label": "PERLU PERHATIAN"},
+            "danger": {"color": "red", "icon": "❌", "label": "TIDAK LAYAK MINUM"}
+        }
+        
+        severity_info = severity_map.get(decision.severity, severity_map["safe"])
+        
+        logger.info(f"GET /api/latest - Status: {decision.severity} | Potable: {decision.potable} | Coliform: {infer.pred_total_coliform_mv:.3f}")
+        
+        # 5) Build response
+        return {
+            "timestamp": latest.get("timestamp"),
+            "sensor_data": {
+                "temp_c": latest.get("temp_c"),
+                "do_mgl": latest.get("do_mgl"),
+                "ph": latest.get("ph"),
+                "conductivity_uscm": latest.get("conductivity_uscm"),
+                "totalcoliform_mv_raw": latest.get("totalcoliform_mv_raw"),
+                "totalcoliform_mv": latest.get("totalcoliform_mv")
+            },
+            "prediction": {
+                "total_coliform_mv": infer.pred_total_coliform_mv,
+                "confidence_interval": {
+                    "low": infer.pred_ci90_low,
+                    "high": infer.pred_ci90_high
+                }
+            },
+            "status": {
+                "potable": decision.potable,
+                "severity": decision.severity,
+                "label": severity_info["label"],
+                "color": severity_info["color"],
+                "icon": severity_info["icon"],
+                "reasons": decision.reasons,
+                "recommendations": decision.recommendations
+            },
+            "badges": badges
+        }
+        
+    except Exception as e:
+        logger.error(f"GET /api/latest - Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating status: {str(e)}")
