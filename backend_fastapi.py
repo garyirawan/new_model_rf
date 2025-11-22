@@ -496,6 +496,7 @@ def convert_mv_to_mpn(mv_value: Optional[float]) -> Optional[float]:
     Konversi nilai sensor Total Coliform dari mV ke MPN/100mL
     
     Berdasarkan kalibrasi sensor fiber optik:
+    - -1 = SENSOR RUSAK (faulty sensor indicator)
     - 0 mV = 0 MPN/100mL (tidak ada bakteri)
     - 1000 mV = 10 MPN/100mL (kontaminasi tinggi)
     
@@ -505,10 +506,14 @@ def convert_mv_to_mpn(mv_value: Optional[float]) -> Optional[float]:
     if mv_value is None:
         return None
     
+    # SENSOR RUSAK: nilai -1 teruskan langsung (tidak dikonversi)
+    if mv_value == -1:
+        return -1.0
+    
     # Formula konversi: mV / 100
     mpn_100ml = mv_value / 100.0
     
-    # Batasi nilai minimum ke 0 (tidak boleh negatif)
+    # Batasi nilai minimum ke 0 (tidak boleh negatif, kecuali -1)
     return max(0.0, mpn_100ml)
 
 @app.post(
@@ -597,8 +602,13 @@ def receive_iot_data(data: IoTDataInput):
         # Konversi sensor mV ke MPN/100mL (input field is raw mV)
         totalcoliform_mpn = convert_mv_to_mpn(data.totalcoliform_mv_raw)
 
-        # Format coliform value untuk logging
-        coliform_display = f"{totalcoliform_mpn:.3f}" if totalcoliform_mpn is not None else "N/A"
+        # Format coliform value untuk logging (handle sensor rusak)
+        if totalcoliform_mpn == -1:
+            coliform_display = "RUSAK"
+        elif totalcoliform_mpn is not None:
+            coliform_display = f"{totalcoliform_mpn:.3f}"
+        else:
+            coliform_display = "N/A"
 
         # Log incoming IoT data
         logger.info(f"📡 IoT Data received: temp={data.temp_c}°C, DO={data.do_mgl}mg/L, pH={data.ph}, cond={data.conductivity_uscm}µS/cm, coliform_mv_raw={data.totalcoliform_mv_raw}mV → {coliform_display} MPN/100mL")

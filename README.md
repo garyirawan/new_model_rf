@@ -10,6 +10,9 @@ Sistem pemantauan kualitas air berbasis AI menggunakan Random Forest untuk mempr
 - ✅ Real-time monitoring dengan visualisasi interaktif
 - ✅ Rekomendasi tindakan otomatis
 - ✅ Dashboard modern dengan React + Vite
+- ✅ **Handling sensor rusak dengan nilai -1** (badge abu-abu)
+- ✅ **GET API endpoint** untuk integrasi third-party website
+- ✅ **Priority logic max-based**: ambil nilai tertinggi antara sensor dan AI prediction
 
 ## 📊 Model AI
 
@@ -119,6 +122,25 @@ Content-Type: application/json
 
 > **Update Nov 2025**: Threshold Total Coliform diubah dari 0.0 ke 0.70 MPN/100mL untuk memberikan spare margin terhadap fluktuasi keempat parameter input (temperature, DO, pH, conductivity).
 
+### 🔧 Sensor Rusak (Faulty Sensor)
+**Konvensi:** ESP32 mengirim **nilai -1** untuk menandakan sensor rusak.
+
+| Status | Badge Color | Behavior |
+|--------|-------------|----------|
+| **Faulty (-1)** | 🔘 Abu-abu | Sensor diabaikan, gunakan AI prediction saja |
+| Unknown (None) | ⚪ Abu muda | Data tidak ada |
+
+Lihat [SENSOR_RUSAK_HANDLING.md](docs/SENSOR_RUSAK_HANDLING.md) untuk detail implementasi.
+
+### 📊 Priority Logic (Updated Nov 22, 2025)
+**Max-based priority:** Ambil nilai **TERTINGGI** antara sensor dan AI prediction untuk keputusan kelayakan.
+
+```
+final_coliform = max(sensor_coliform, ai_prediction)
+```
+
+**Alasan:** Lebih konservatif untuk keamanan - prioritaskan nilai kontaminasi yang lebih tinggi.
+
 ## 🔧 Environment Variables
 
 ```bash
@@ -138,7 +160,15 @@ new_model_rf/
 ├── frontend_water_quality_dashboard_react.tsx  # React dashboard
 ├── requirements.txt            # Python dependencies
 ├── package.json                # Node dependencies
-└── DEPLOYMENT.md              # Deployment guide
+├── docs/
+│   ├── API_GET_ENDPOINT.md     # GET API documentation (6 languages)
+│   ├── SENSOR_RUSAK_HANDLING.md # Sensor rusak (-1) handling guide
+│   ├── FRONTEND_UPDATE_GET_API.md # Frontend integration notes
+│   └── LOGGING_GUIDE.md        # Logging implementation
+├── test_priority.py            # Test priority logic max-based
+├── test_sensor_rusak.py        # Test sensor rusak handling
+├── test_api_sensor_rusak.ps1   # API test untuk sensor rusak
+└── water-quality-ai/           # Hugging Face deployment folder
 ```
 
 ## 🤝 Contributing

@@ -114,6 +114,9 @@ const badgeStyle = (kind: string) => {
     case "danger":
       // Merah - Parameter berbahaya
       return "bg-red-500 text-white font-semibold";
+    case "faulty":
+      // Abu-abu gelap - Sensor rusak
+      return "bg-gray-500 text-white font-semibold";
     case "unknown":
       return "bg-gray-300 text-gray-700";
     default:

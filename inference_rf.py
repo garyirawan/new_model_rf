@@ -95,12 +95,17 @@ def decide_potability(readings: Dict[str, float],
     recs = []
     alt = []
 
-    # PENTING: Prioritas keputusan potabilitas (UPDATED: Nov 21, 2025)
+    # PENTING: Prioritas keputusan potabilitas (UPDATED: Nov 22, 2025)
     # AMBIL NILAI MPN TERTINGGI antara SENSOR dan PREDIKSI AI
     # Alasan: Untuk keamanan, gunakan nilai yang lebih tinggi (lebih konservatif/aman)
     # - Jika sensor deteksi tinggi tapi AI prediksi rendah → pakai sensor (real measurement)
     # - Jika AI prediksi tinggi tapi sensor rendah → pakai AI (bisa ada kontaminan yang tidak terdeteksi sensor)
+    # - Jika sensor rusak (-1) → abaikan sensor, pakai AI saja
     sensor_coliform = readings.get("totalcoliform_mv", None)
+    
+    # Handle sensor rusak (-1): abaikan dan gunakan AI prediction
+    if sensor_coliform == -1:
+        sensor_coliform = None  # Sensor rusak, jangan dipakai untuk decision
     
     # Tentukan nilai untuk keputusan dengan max() dari sensor dan AI prediction
     if sensor_coliform is not None and predicted_coliform_mpn_100ml is not None:
@@ -278,13 +283,15 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
     """
     Status untuk dashboard per-parameter dengan sistem 3 tingkatan.
     Badge format: (level, label)
-    - level: "optimal" (hijau), "warning" (kuning/oranye), "danger" (merah), "unknown" (abu)
+    - level: "optimal" (hijau), "warning" (kuning/oranye), "danger" (merah), "faulty" (abu-abu sensor rusak), "unknown" (abu data tidak ada)
     """
     badges = {}
 
     # === SUHU (3 Tingkat) ===
     temp = readings.get("temp_c", None)
-    if temp is None:
+    if temp == -1:
+        badges["temp_c"] = ("faulty", "⚫ Sensor Rusak")
+    elif temp is None:
         badges["temp_c"] = ("unknown", "–")
     elif thresholds.temp_safe_min_c <= temp <= thresholds.temp_safe_max_c:
         # AMAN: 10-35°C (hijau)
@@ -304,7 +311,9 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
 
     # === pH (Permenkes 2023) ===
     ph = readings.get("ph", None)
-    if ph is None:
+    if ph == -1:
+        badges["ph"] = ("faulty", "⚫ Sensor Rusak")
+    elif ph is None:
         badges["ph"] = ("unknown", "–")
     elif thresholds.ph_min <= ph <= thresholds.ph_max:
         badges["ph"] = ("optimal", f"Aman {ph:.1f}")
@@ -314,7 +323,9 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
     # === DO (4 Tingkat) ===
     # Aman ≥6.0 | Waspada 5.0-5.9 | Bahaya 0-4.99
     do = readings.get("do_mgl", None)
-    if do is None:
+    if do == -1:
+        badges["do_mgl"] = ("faulty", "⚫ Sensor Rusak")
+    elif do is None:
         badges["do_mgl"] = ("unknown", "–")
     elif do >= thresholds.do_optimal_mgl:
         # AMAN: ≥6 mg/L (hijau)
@@ -328,7 +339,9 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
 
     # === KONDUKTIVITAS (EPA) ===
     cond = readings.get("conductivity_uscm", None)
-    if cond is None:
+    if cond == -1:
+        badges["conductivity_uscm"] = ("faulty", "⚫ Sensor Rusak")
+    elif cond is None:
         badges["conductivity_uscm"] = ("unknown", "–")
     elif cond <= thresholds.conductivity_max_uscm:
         badges["conductivity_uscm"] = ("optimal", f"Aman {cond:.0f} µS/cm")
@@ -339,7 +352,9 @@ def status_badges(readings: Dict[str, float], thresholds: Thresholds = Threshold
     # Aman ≤0.70 | Waspada 0.71-0.99 | Bahaya ≥1.0
     # Note: Ambil dari readings jika ada, atau None
     coliform = readings.get("totalcoliform_mv", None)
-    if coliform is None:
+    if coliform == -1:
+        badges["totalcoliform_mv"] = ("faulty", "⚫ Sensor Rusak")
+    elif coliform is None:
         badges["totalcoliform_mv"] = ("unknown", "–")
     elif coliform <= thresholds.total_coliform_safe_mpn_100ml:
         # AMAN: ≤0.70 MPN/100mL (hijau)
